@@ -11,13 +11,6 @@ import { AtSign, KeyRound, Loader2, Lock, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "./shared"
 
-const DEMO_ACCOUNTS = [
-  { role: "Red", email: "red@mybuddymaid.com", password: "Red@2026", note: "Owner · full control" },
-  { role: "Admin", email: "admin@mybuddymaid.com", password: "Admin@2026", note: "Managers & employees" },
-  { role: "Manager", email: "manager@mybuddymaid.com", password: "Manager@2026", note: "Approvals & finance" },
-  { role: "Employee", email: "employee@mybuddymaid.com", password: "Employee@2026", note: "Own expenses" },
-]
-
 export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -38,12 +31,6 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     } finally {
       setBusy(false)
     }
-  }
-
-  function fill(account: (typeof DEMO_ACCOUNTS)[number]) {
-    setEmail(account.email)
-    setPassword(account.password)
-    setError(null)
   }
 
   return (
@@ -129,24 +116,6 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
             <ShieldCheck className="h-3.5 w-3.5" />
             Invite-only · accounts are granted by an administrator
           </p>
-        </div>
-
-        {/* Demo accounts — click to fill */}
-        <div className="mt-5 rounded-2xl border border-black/5 bg-white/50 p-4 backdrop-blur-md dark:border-white/8 dark:bg-white/5">
-          <p className="micro-label mb-2.5">Demo accounts — tap to fill</p>
-          <div className="grid grid-cols-2 gap-2">
-            {DEMO_ACCOUNTS.map((a) => (
-              <button
-                key={a.email}
-                type="button"
-                onClick={() => fill(a)}
-                className="press rounded-xl border border-black/5 bg-white/70 px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-white dark:border-white/8 dark:bg-white/5 dark:hover:bg-white/10"
-              >
-                <p className="text-[13px] font-semibold">{a.role}</p>
-                <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{a.note}</p>
-              </button>
-            ))}
-          </div>
         </div>
       </motion.div>
     </div>

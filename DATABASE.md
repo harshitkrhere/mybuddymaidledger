@@ -129,14 +129,19 @@ modes don't support all session state; that is what `DIRECT_DATABASE_URL` is for
 | `npm run db:e2e` | Full-stack verification suite (56 checks) against the running app |
 | `node scripts/db-ensure.mjs` | Print which database the app would use right now |
 
-### Seeded sign-ins (after `db:seed`)
+### Seeded accounts (after `db:seed`)
 
 | Role | Email | Password |
 |---|---|---|
-| Red | `red@mybuddymaid.com` | `Red@2026` |
-| Admin | `admin@mybuddymaid.com` | `Admin@2026` |
-| Manager | `manager@mybuddymaid.com` | `Manager@2026` |
-| Employee | `employee@mybuddymaid.com` | `Employee@2026` |
+| Red | `red@mybuddymaid.com` | from `SEED_PASSWORD_RED` |
+| Admin | `admin@mybuddymaid.com` | from `SEED_PASSWORD_ADMIN` |
+| Manager | `manager@mybuddymaid.com` | from `SEED_PASSWORD_MANAGER` |
+| Employee | `employee@mybuddymaid.com` | from `SEED_PASSWORD_EMPLOYEE` |
 
-> Change these immediately on any real deployment (Settings → password, or
-> Red/Admin reset from the Team module).
+> **Security:** seed passwords are **never hardcoded** in the repo, the login
+> page, or any client bundle. They are read from `SEED_PASSWORD_*` environment
+> variables — set them in the gitignored `.env` (local dev) or as platform
+> secrets (production) before running `db:seed` / `db:e2e`. Seeding fails fast
+> if any variable is missing or shorter than 8 characters. On a real
+> deployment, rotate these immediately (Settings → password, or Red/Admin
+> reset from the Team module).

@@ -18,13 +18,26 @@
 //   · error boundary: server errors never leak internals
 // ============================================================
 
+import { config as loadEnv } from "dotenv"
+loadEnv() // gitignored .env holds SEED_PASSWORD_* — never hardcoded secrets
+
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:3000"
 
+// SECURITY: credentials are read from the environment (set them in the
+// gitignored .env, or export before running). No hardcoded secrets here.
+function requiredCred(role) {
+  const email = process.env[`E2E_EMAIL_${role.toUpperCase()}`] ?? `${role}@mybuddymaid.com`
+  const password = process.env[`SEED_PASSWORD_${role.toUpperCase()}`]
+  if (!password) {
+    throw new Error(`Missing SEED_PASSWORD_${role.toUpperCase()} — set it in .env (gitignored) or export it before running db:e2e.`)
+  }
+  return { email, password }
+}
 const CREDS = {
-  red: { email: "red@mybuddymaid.com", password: "Red@2026" },
-  admin: { email: "admin@mybuddymaid.com", password: "Admin@2026" },
-  manager: { email: "manager@mybuddymaid.com", password: "Manager@2026" },
-  employee: { email: "employee@mybuddymaid.com", password: "Employee@2026" },
+  red: requiredCred("red"),
+  admin: requiredCred("admin"),
+  manager: requiredCred("manager"),
+  employee: requiredCred("employee"),
 }
 
 // ---------------- tiny test harness ----------------

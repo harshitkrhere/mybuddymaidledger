@@ -3,6 +3,11 @@
 // Creates one user per role, categories, clients, and a year of
 // realistic finance data so the dashboard feels alive on day one.
 // Run: bun run db:seed
+//
+// SECURITY: account passwords are NEVER hardcoded here. They are
+// read from the SEED_PASSWORD_* environment variables (set them in
+// .env — which is gitignored — or as platform secrets). Seeding
+// fails fast if any of them is missing.
 // ============================================================
 
 import { PrismaClient } from "@prisma/client"
@@ -23,11 +28,23 @@ function between(min: number, max: number) {
   return Math.round(min + rnd() * (max - min))
 }
 
+// Required, env-provided credentials — no defaults, no fallbacks.
+function requiredSeedPassword(name: string): string {
+  const value = process.env[`SEED_PASSWORD_${name.toUpperCase()}`]
+  if (!value || value.length < 8) {
+    throw new Error(
+      `Missing or too-short SEED_PASSWORD_${name.toUpperCase()} — set it in .env (gitignored) ` +
+        `or as a platform secret, then re-run db:seed. Minimum length: 8 characters.`,
+    )
+  }
+  return value
+}
+
 const PASSWORDS: Record<string, string> = {
-  red: "Red@2026",
-  admin: "Admin@2026",
-  manager: "Manager@2026",
-  employee: "Employee@2026",
+  red: requiredSeedPassword("red"),
+  admin: requiredSeedPassword("admin"),
+  manager: requiredSeedPassword("manager"),
+  employee: requiredSeedPassword("employee"),
 }
 
 async function main() {
@@ -385,11 +402,12 @@ async function main() {
     categories: await db.category.count(),
   }
   console.log("Seed complete:", counts)
-  console.log("\nDemo sign-ins:")
-  console.log("  Red      red@mybuddymaid.com      / " + PASSWORDS.red)
-  console.log("  Admin    admin@mybuddymaid.com    / " + PASSWORDS.admin)
-  console.log("  Manager  manager@mybuddymaid.com  / " + PASSWORDS.manager)
-  console.log("  Employee employee@mybuddymaid.com / " + PASSWORDS.employee)
+  // Never echo the passwords themselves — just confirm where they came from.
+  console.log("\nSeeded accounts (passwords taken from SEED_PASSWORD_* env vars, never printed):")
+  console.log("  Red      red@mybuddymaid.com")
+  console.log("  Admin    admin@mybuddymaid.com")
+  console.log("  Manager  manager@mybuddymaid.com")
+  console.log("  Employee employee@mybuddymaid.com")
 }
 
 main()
