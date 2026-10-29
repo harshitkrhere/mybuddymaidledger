@@ -39,18 +39,22 @@ import {
   type TeamUser,
 } from "./shared"
 import { EmptyState } from "./shared"
+import { DebouncedSearchInput, HighlightMatch } from "./search-input"
 
 type ListResponse = { users: TeamUser[]; assignableRoles: Role[] }
 
 const ALL_ROLES: Role[] = ["RED", "ADMIN", "MANAGER", "EMPLOYEE"]
 
 export function TeamView({ me, onMutation }: { me: Me; onMutation: () => void }) {
-  const { data, loading, error, reload } = useApi<ListResponse>("/api/users")
+  const [search, setSearch] = useState("")
+  const url = useMemo(() => {
+    return search.trim() ? `/api/users?q=${encodeURIComponent(search.trim())}` : "/api/users"
+  }, [search])
+  const { data, loading, error, reload } = useApi<ListResponse>(url)
   const [adding, setAdding] = useState(false)
   const [resetting, setResetting] = useState<TeamUser | null>(null)
   const [deactivating, setDeactivating] = useState<TeamUser | null>(null)
   const [roleChanging, setRoleChanging] = useState<string | null>(null)
-
   const isRed = me.user.role === "RED"
 
   const counts = useMemo(() => {
@@ -140,6 +144,18 @@ export function TeamView({ me, onMutation }: { me: Me; onMutation: () => void })
         ))}
       </div>
 
+      {/* Search bar */}
+      <div className="card-shadow mb-5 flex items-center gap-2.5 rounded-2xl border bg-card p-3">
+        <DebouncedSearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search team by name, email, role, title… (/)"
+          loading={loading}
+          totalResults={data?.users.length}
+          className="w-full flex-1"
+        />
+      </div>
+
       {/* User table */}
       <div className="card-shadow overflow-hidden rounded-2xl border bg-card">
         {error && <ErrorNote message={error} />}
@@ -176,10 +192,18 @@ export function TeamView({ me, onMutation }: { me: Me; onMutation: () => void })
                           </Avatar>
                           <div className="min-w-0">
                             <p className="flex items-center gap-2 font-semibold leading-tight">
-                              {u.name}
+                              <HighlightMatch text={u.name} query={search} />
                               {isSelf && <span className="rounded-full bg-muted px-2 py-px text-[10px] font-semibold text-muted-foreground">You</span>}
                             </p>
-                            <p className="truncate text-[12px] text-muted-foreground">{u.email}{u.title ? ` · ${u.title}` : ""}</p>
+                            <p className="truncate text-[12px] text-muted-foreground">
+                              <HighlightMatch text={u.email} query={search} />
+                              {u.title && (
+                                <span>
+                                  {" · "}
+                                  <HighlightMatch text={u.title} query={search} />
+                                </span>
+                              )}
+                            </p>
                           </div>
                         </div>
                       </td>

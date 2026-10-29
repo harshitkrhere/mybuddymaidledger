@@ -20,9 +20,11 @@ export const GET = route("clients.list", async (req) => {
   if (type === "CLIENT" || type === "VENDOR") where.type = type
   if (search) {
     where.OR = [
-      { name: { contains: search } },
-      { email: { contains: search } },
-      { phone: { contains: search } },
+      { name: { contains: search, mode: "insensitive" } },
+      { email: { contains: search, mode: "insensitive" } },
+      { phone: { contains: search, mode: "insensitive" } },
+      { address: { contains: search, mode: "insensitive" } },
+      { notes: { contains: search, mode: "insensitive" } },
     ]
   }
 

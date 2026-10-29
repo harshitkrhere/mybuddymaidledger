@@ -20,10 +20,10 @@ export const GET = route("audit.list", async (req) => {
   if (action && action !== "ALL") where.action = action
   if (search) {
     where.OR = [
-      { targetLabel: { contains: search } },
-      { action: { contains: search.toUpperCase() } },
-      { actor: { name: { contains: search } } },
-      { actor: { email: { contains: search } } },
+      { targetLabel: { contains: search, mode: "insensitive" } },
+      { action: { contains: search, mode: "insensitive" } },
+      { actor: { name: { contains: search, mode: "insensitive" } } },
+      { actor: { email: { contains: search, mode: "insensitive" } } },
     ]
   }
 

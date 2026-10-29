@@ -42,6 +42,7 @@ import {
   type Me,
 } from "./shared"
 import { EmptyState } from "./shared"
+import { DebouncedSearchInput, HighlightMatch } from "./search-input"
 
 type ListResponse = {
   invoices: InvoiceT[]
@@ -154,15 +155,17 @@ export function InvoicesView({ me, onMutation }: { me: Me; onMutation: () => voi
             </button>
           ))}
         </div>
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-            placeholder="Search by number or client…"
-            className="h-9 rounded-lg pl-9 bg-muted/50 border-transparent focus:bg-background"
-          />
-        </div>
+        <DebouncedSearchInput
+          value={search}
+          onChange={(v) => {
+            setSearch(v)
+            setPage(1)
+          }}
+          placeholder="Search by invoice #, client, items, amount… (/)"
+          loading={loading}
+          totalResults={data?.pagination.total}
+          className="min-w-[240px] flex-1"
+        />
       </div>
 
       {/* Table */}
@@ -191,8 +194,12 @@ export function InvoicesView({ me, onMutation }: { me: Me; onMutation: () => voi
                   const ds = derivedStatus(inv)
                   return (
                     <tr key={inv.id} className="cursor-pointer transition-colors hover:bg-accent/50" onClick={() => setViewing(inv)}>
-                      <td className="whitespace-nowrap px-5 py-3.5 font-semibold">{inv.number}</td>
-                      <td className="max-w-[180px] truncate px-3 py-3.5">{inv.client.name}</td>
+                      <td className="whitespace-nowrap px-5 py-3.5 font-semibold">
+                        <HighlightMatch text={inv.number} query={search} />
+                      </td>
+                      <td className="max-w-[180px] truncate px-3 py-3.5">
+                        <HighlightMatch text={inv.client.name} query={search} />
+                      </td>
                       <td className="whitespace-nowrap px-3 py-3.5 text-muted-foreground">{fmtDate(inv.issueDate)}</td>
                       <td className="whitespace-nowrap px-3 py-3.5 text-muted-foreground">{fmtDate(inv.dueDate)}</td>
                       <td className="px-3 py-3.5"><Pill tone={invoiceTone(ds)}>{ds.charAt(0) + ds.slice(1).toLowerCase()}</Pill></td>

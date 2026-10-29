@@ -40,6 +40,7 @@ import {
   type ClientT,
   type Me,
 } from "./shared"
+import { DebouncedSearchInput, HighlightMatch } from "./search-input"
 import { Skeleton } from "@/components/ui/skeleton"
 
 type ListResponse = { clients: ClientT[] }
@@ -114,15 +115,14 @@ export function ClientsView({ me, onMutation }: { me: Me; onMutation: () => void
             </button>
           ))}
         </div>
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, email or phone…"
-            className="h-9 rounded-lg pl-9 bg-muted/50 border-transparent focus:bg-background"
-          />
-        </div>
+        <DebouncedSearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search by name, email, phone, company… (/)"
+          loading={loading}
+          totalResults={data?.clients.length}
+          className="min-w-[220px] flex-1"
+        />
       </div>
 
       {error && <ErrorNote message={error} />}
@@ -154,7 +154,9 @@ export function ClientsView({ me, onMutation }: { me: Me; onMutation: () => void
                     {c.type === "VENDOR" ? <Building2 className="h-5 w-5" /> : <Users className="h-5 w-5" />}
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-[15px] font-semibold leading-tight">{c.name}</p>
+                    <p className="truncate text-[15px] font-semibold leading-tight">
+                      <HighlightMatch text={c.name} query={search} />
+                    </p>
                     <div className="mt-1 flex items-center gap-1.5">
                       <Pill tone={c.type === "VENDOR" ? "violet" : "blue"}>{c.type === "VENDOR" ? "Vendor" : "Client"}</Pill>
                       {!c.isActive && <Pill tone="gray">Inactive</Pill>}
@@ -174,7 +176,12 @@ export function ClientsView({ me, onMutation }: { me: Me; onMutation: () => void
               </div>
 
               <div className="mt-4 space-y-1.5 text-[13px] text-muted-foreground">
-                {c.email && <p className="flex items-center gap-2 truncate"><Mail className="h-3.5 w-3.5 shrink-0" /> {c.email}</p>}
+                {c.email && (
+                  <p className="flex items-center gap-2 truncate">
+                    <Mail className="h-3.5 w-3.5 shrink-0" />
+                    <HighlightMatch text={c.email} query={search} />
+                  </p>
+                )}
                 {c.phone && <p className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 shrink-0" /> {c.phone}</p>}
                 {c.address && <p className="flex items-center gap-2 truncate"><MapPin className="h-3.5 w-3.5 shrink-0" /> {c.address}</p>}
               </div>

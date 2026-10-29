@@ -9,7 +9,7 @@
 // SQLite fallback), so CLI tools never accidentally hit the
 // platform's default file: URL.
 // ============================================================
-import { spawn } from "node:child_process"
+import { spawn, execSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 
@@ -20,9 +20,25 @@ const resolved = await resolveDatabase()
 const masked = resolved.url.replace(/\/\/([^:]+):([^@]+)@/, "//$1:***@")
 console.log(`[with-db] ${masked}`)
 
-const [cmd, ...args] = process.argv.slice(2)
+function hasBun() {
+  try {
+    execSync(process.platform === "win32" ? "where bun" : "which bun", { stdio: "ignore" })
+    return true
+  } catch {
+    return false
+  }
+}
+
+let [cmd, ...args] = process.argv.slice(2)
+const isWin = process.platform === "win32"
+if (cmd === "bun" && !hasBun()) {
+  cmd = isWin ? "npx.cmd" : "npx"
+  args = ["tsx", ...args]
+}
+
 const child = spawn(cmd, args, {
   cwd: ROOT,
+  shell: isWin,
   env: {
     ...process.env,
     DATABASE_URL: resolved.url,

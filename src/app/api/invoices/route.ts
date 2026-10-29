@@ -32,7 +32,16 @@ export const GET = route("invoices.list", async (req) => {
   if (status && ["DRAFT", "SENT", "PAID"].includes(status)) where.status = status
   if (clientId) where.clientId = clientId
   if (search) {
-    where.OR = [{ number: { contains: search } }, { client: { name: { contains: search } } }]
+    const cleanNum = parseFloat(search.replace(/[₹$,\s]/g, ""))
+    const hasNum = !isNaN(cleanNum) && cleanNum > 0
+    where.OR = [
+      { number: { contains: search, mode: "insensitive" } },
+      { client: { name: { contains: search, mode: "insensitive" } } },
+      { client: { email: { contains: search, mode: "insensitive" } } },
+      { notes: { contains: search, mode: "insensitive" } },
+      { items: { some: { description: { contains: search, mode: "insensitive" } } } },
+      ...(hasNum ? [{ total: { gte: cleanNum * 0.999, lte: cleanNum * 1.001 } }] : []),
+    ]
   }
 
   const [total, invoices, clients] = await Promise.all([

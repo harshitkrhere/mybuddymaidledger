@@ -12,11 +12,25 @@ import { CreateUserSchema, parseWith } from "@/lib/validation"
 // ============================================================
 
 // GET — list all users (Red/Admin only)
-export const GET = route("users.list", async () => {
+export const GET = route("users.list", async (req) => {
   const guard = await requireRole("RED", "ADMIN")
   if ("response" in guard) return guard.response
 
+  const url = new URL(req.url)
+  const search = (url.searchParams.get("q") ?? "").trim().slice(0, 200)
+
+  const where: Record<string, unknown> = {}
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: "insensitive" } },
+      { email: { contains: search, mode: "insensitive" } },
+      { role: { contains: search, mode: "insensitive" } },
+      { title: { contains: search, mode: "insensitive" } },
+    ]
+  }
+
   const users = await db.user.findMany({
+    where,
     orderBy: [{ status: "desc" }, { createdAt: "asc" }],
     select: {
       id: true,

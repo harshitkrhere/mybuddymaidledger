@@ -33,10 +33,14 @@ export const GET = route("transactions.list", async (req) => {
     }
   }
   if (search) {
+    const cleanNum = parseFloat(search.replace(/[₹$,\s]/g, ""))
+    const hasNum = !isNaN(cleanNum) && cleanNum > 0
     where.OR = [
-      { description: { contains: search } },
-      { reference: { contains: search } },
-      { client: { name: { contains: search } } },
+      { description: { contains: search, mode: "insensitive" } },
+      { reference: { contains: search, mode: "insensitive" } },
+      { client: { name: { contains: search, mode: "insensitive" } } },
+      { category: { name: { contains: search, mode: "insensitive" } } },
+      ...(hasNum ? [{ amount: { gte: cleanNum * 0.999, lte: cleanNum * 1.001 } }] : []),
     ]
   }
 

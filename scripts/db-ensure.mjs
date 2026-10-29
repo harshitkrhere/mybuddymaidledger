@@ -16,7 +16,7 @@
 // Exports resolveDatabase() for scripts/dev.mjs; the CLI prints the
 // chosen target WITHOUT credentials.
 // ============================================================
-import { execFileSync } from "node:child_process"
+import { execFileSync, execSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -35,7 +35,13 @@ function readEnvFile() {
   for (const line of readFileSync(ENV_FILE, "utf8").split("\n")) {
     if (line.trim().startsWith("#")) continue
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.+?)\s*$/)
-    if (m) map[m[1]] = m[2]
+    if (m) {
+      let val = m[2].trim()
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1)
+      }
+      map[m[1]] = val
+    }
   }
   return map
 }
@@ -67,8 +73,21 @@ export function setProvider(provider) {
   writeFileSync(SCHEMA, schema)
 }
 
+function hasBun() {
+  try {
+    execSync(process.platform === "win32" ? "where bun" : "which bun", { stdio: "ignore" })
+    return true
+  } catch {
+    return false
+  }
+}
+
 function prismaGenerate() {
-  execFileSync("bunx", ["prisma", "generate"], { cwd: ROOT, stdio: "pipe" })
+  if (hasBun()) {
+    execFileSync("bunx", ["prisma", "generate"], { cwd: ROOT, stdio: "pipe" })
+  } else {
+    execSync("npx prisma generate", { cwd: ROOT, stdio: "pipe" })
+  }
 }
 
 /**
@@ -79,9 +98,9 @@ function prismaGenerate() {
  */
 export async function resolveDatabase() {
   const envFile = readEnvFile()
-  // Real environment variables win over .env (platform convention).
-  const envUrl = process.env.DATABASE_URL || envFile.DATABASE_URL || ""
-  const directUrl = process.env.DIRECT_DATABASE_URL || envFile.DIRECT_DATABASE_URL || ""
+  // Prefer .env when defined so local file changes take effect immediately
+  const envUrl = envFile.DATABASE_URL || process.env.DATABASE_URL || ""
+  const directUrl = envFile.DIRECT_DATABASE_URL || process.env.DIRECT_DATABASE_URL || ""
 
   if (isPostgresUrl(envUrl)) {
     if (currentProvider() !== "postgresql") {
@@ -115,7 +134,11 @@ export async function resolveDatabase() {
       setProvider("sqlite")
       prismaGenerate()
     }
-    execFileSync("bunx", ["prisma", "db", "push", "--accept-data-loss"], { cwd: ROOT, stdio: "pipe" })
+    if (hasBun()) {
+      execFileSync("bunx", ["prisma", "db", "push", "--accept-data-loss"], { cwd: ROOT, stdio: "pipe" })
+    } else {
+      execSync("npx prisma db push --accept-data-loss", { cwd: ROOT, stdio: "pipe" })
+    }
     return { kind: "sqlite", url, directUrl: "", host: "", local: true }
   }
 

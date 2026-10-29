@@ -45,6 +45,7 @@ import {
   type UserLite,
 } from "./shared"
 import { EmptyState } from "./shared"
+import { DebouncedSearchInput, HighlightMatch } from "./search-input"
 
 type ListResponse = {
   expenses: ExpenseT[]
@@ -161,15 +162,17 @@ export function ExpensesView({ me, onMutation }: { me: Me; onMutation: () => voi
             </SelectContent>
           </Select>
         )}
-        <div className="relative min-w-[200px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-            placeholder="Search descriptions…"
-            className="h-9 rounded-lg pl-9 bg-muted/50 border-transparent focus:bg-background"
-          />
-        </div>
+        <DebouncedSearchInput
+          value={search}
+          onChange={(v) => {
+            setSearch(v)
+            setPage(1)
+          }}
+          placeholder="Search description, submitter, category, amount… (/)"
+          loading={loading}
+          totalResults={data?.pagination.total}
+          className="min-w-[220px] flex-1"
+        />
       </div>
 
       {/* List */}
@@ -202,14 +205,18 @@ export function ExpensesView({ me, onMutation }: { me: Me; onMutation: () => voi
                           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-[10.5px] font-semibold text-primary">
                             {e.submitter.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
                           </span>
-                          <span className="font-medium">{e.submitter.name}</span>
+                          <span className="font-medium">
+                            <HighlightMatch text={e.submitter.name} query={search} />
+                          </span>
                         </div>
                       ) : (
                         <span className="text-muted-foreground">{fmtDate(e.date)}</span>
                       )}
                     </td>
                     <td className="max-w-[260px] px-3 py-3.5">
-                      <p className="truncate font-medium">{e.description}</p>
+                      <p className="truncate font-medium">
+                        <HighlightMatch text={e.description} query={search} />
+                      </p>
                       {e.reviewNote && <p className="truncate text-[12px] text-muted-foreground">“{e.reviewNote}” · {e.reviewer?.name ?? ""}</p>}
                       {!e.reviewNote && e.receiptRef && <p className="truncate text-[12px] text-muted-foreground">Receipt {e.receiptRef}</p>}
                     </td>

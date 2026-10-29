@@ -10,7 +10,7 @@
 //      shadow the real database.
 //   3. tee output to dev.log (same contract as before).
 // ============================================================
-import { spawn } from "node:child_process"
+import { spawn, execSync } from "node:child_process"
 import { createWriteStream, openSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -33,15 +33,36 @@ writeFileSync(
   { mode: 0o600 }
 )
 
-const child = spawn("bunx", ["next", "dev", "-p", "3000"], {
-  cwd: ROOT,
-  env: {
-    ...process.env,
-    DATABASE_URL: resolved.url,
-    DIRECT_DATABASE_URL: resolved.directUrl || resolved.url,
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-})
+function hasBun() {
+  try {
+    execSync(process.platform === "win32" ? "where bun" : "which bun", { stdio: "ignore" })
+    return true
+  } catch {
+    return false
+  }
+}
+
+const isWin = process.platform === "win32"
+const child = hasBun()
+  ? spawn("bunx", ["next", "dev", "-p", "3000"], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        DATABASE_URL: resolved.url,
+        DIRECT_DATABASE_URL: resolved.directUrl || resolved.url,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+  : spawn(isWin ? "npx.cmd" : "npx", ["next", "dev", "-p", "3000"], {
+      cwd: ROOT,
+      shell: isWin,
+      env: {
+        ...process.env,
+        DATABASE_URL: resolved.url,
+        DIRECT_DATABASE_URL: resolved.directUrl || resolved.url,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
 
 // dev.log keeps the platform contract: full server output on disk.
 const logStream = createWriteStream(join(ROOT, "dev.log"), { flags: "a" })

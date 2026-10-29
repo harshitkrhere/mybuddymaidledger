@@ -14,8 +14,8 @@ export default function NotFound() {
           This record or page does not exist. It may have been deleted.
         </p>
       </div>
-      <Button asChild>
-        <Link href="/">Back to ERP</Link>
+      <Button asChild className="rounded-full px-5">
+        <Link href="/">Back to Dashboard</Link>
       </Button>
     </div>
   );

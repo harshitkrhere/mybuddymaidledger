@@ -32,7 +32,17 @@ export const GET = route("expenses.list", async (req) => {
   else if (submittedById) where.submittedById = submittedById
   if (status && ["PENDING", "APPROVED", "REJECTED"].includes(status)) where.status = status
   if (categoryId) where.categoryId = categoryId
-  if (search) where.description = { contains: search }
+  if (search) {
+    const cleanNum = parseFloat(search.replace(/[₹$,\s]/g, ""))
+    const hasNum = !isNaN(cleanNum) && cleanNum > 0
+    where.OR = [
+      { description: { contains: search, mode: "insensitive" } },
+      { receiptRef: { contains: search, mode: "insensitive" } },
+      { category: { name: { contains: search, mode: "insensitive" } } },
+      { submitter: { name: { contains: search, mode: "insensitive" } } },
+      ...(hasNum ? [{ amount: { gte: cleanNum * 0.999, lte: cleanNum * 1.001 } }] : []),
+    ]
+  }
 
   const [total, expenses, categories, submitters, pendingCount] = await Promise.all([
     db.expense.count({ where }),

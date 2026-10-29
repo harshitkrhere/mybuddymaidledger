@@ -20,6 +20,7 @@ import {
   useApi,
 } from "./shared"
 import { EmptyState } from "./shared"
+import { DebouncedSearchInput, HighlightMatch } from "./search-input"
 
 type ListResponse = {
   entries: {
@@ -97,15 +98,17 @@ export function AuditView() {
 
       {/* Filter bar */}
       <div className="card-shadow mb-5 flex flex-wrap items-center gap-2.5 rounded-2xl border bg-card p-3">
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-            placeholder="Search people, targets or actions…"
-            className="h-9 rounded-lg pl-9 bg-muted/50 border-transparent focus:bg-background"
-          />
-        </div>
+        <DebouncedSearchInput
+          value={search}
+          onChange={(v) => {
+            setSearch(v)
+            setPage(1)
+          }}
+          placeholder="Search people, targets, emails or actions… (/)"
+          loading={loading}
+          totalResults={data?.pagination.total}
+          className="min-w-[220px] flex-1"
+        />
         <Select value={action} onValueChange={(v) => { setAction(v); setPage(1) }}>
           <SelectTrigger className="h-9 w-[210px] rounded-lg bg-muted/50 border-transparent"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -156,7 +159,9 @@ export function AuditView() {
                               {e.actor.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
                             </span>
                             <div>
-                              <p className="font-medium leading-tight">{e.actor.name}</p>
+                              <p className="font-medium leading-tight">
+                                <HighlightMatch text={e.actor.name} query={search} />
+                              </p>
                               <div className="mt-0.5"><RoleBadge role={e.actor.role} /></div>
                             </div>
                           </div>
@@ -168,7 +173,9 @@ export function AuditView() {
                       <td className="max-w-[200px] px-3 py-3.5">
                         {e.targetLabel ? (
                           <div>
-                            <p className="truncate font-medium">{e.targetLabel}</p>
+                            <p className="truncate font-medium">
+                              <HighlightMatch text={e.targetLabel} query={search} />
+                            </p>
                             {e.targetType && <p className="text-[11.5px] text-muted-foreground">{e.targetType.toLowerCase()}</p>}
                           </div>
                         ) : (

@@ -41,6 +41,7 @@ import {
   type TransactionT,
 } from "./shared"
 import { EmptyState } from "./shared"
+import { DebouncedSearchInput, HighlightMatch } from "./search-input"
 
 type ListResponse = {
   transactions: TransactionT[]
@@ -106,18 +107,17 @@ export function TransactionsView({ me, onMutation }: { me: Me; onMutation: () =>
 
       {/* Filter bar */}
       <div className="card-shadow mb-5 flex flex-wrap items-center gap-2.5 rounded-2xl border bg-card p-3">
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value)
-              resetPage()
-            }}
-            placeholder="Search description, reference or client…"
-            className="h-9 rounded-lg pl-9 bg-muted/50 border-transparent focus:bg-background"
-          />
-        </div>
+        <DebouncedSearchInput
+          value={search}
+          onChange={(v) => {
+            setSearch(v)
+            resetPage()
+          }}
+          placeholder="Search by description, reference, party, amount… (/)"
+          loading={loading}
+          totalResults={data?.pagination.total}
+          className="min-w-[240px] flex-1"
+        />
         <Select value={type} onValueChange={(v) => { setType(v); resetPage() }}>
           <SelectTrigger className="h-9 w-[130px] rounded-lg bg-muted/50 border-transparent"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -191,13 +191,21 @@ export function TransactionsView({ me, onMutation }: { me: Me; onMutation: () =>
                   <tr key={t.id} className="transition-colors hover:bg-accent/50">
                     <td className="whitespace-nowrap px-5 py-3.5 text-muted-foreground">{fmtDate(t.date)}</td>
                     <td className="max-w-[260px] px-3 py-3.5">
-                      <p className="truncate font-medium">{t.description}</p>
-                      {t.reference && <p className="truncate text-[12px] text-muted-foreground">Ref {t.reference}</p>}
+                      <p className="truncate font-medium">
+                        <HighlightMatch text={t.description} query={search} />
+                      </p>
+                      {t.reference && (
+                        <p className="truncate text-[12px] text-muted-foreground">
+                          Ref <HighlightMatch text={t.reference} query={search} />
+                        </p>
+                      )}
                     </td>
                     <td className="px-3 py-3.5">
                       <Pill tone={t.type === "INCOME" ? "green" : "red"}>{t.category?.name ?? "—"}</Pill>
                     </td>
-                    <td className="hidden max-w-[160px] truncate px-3 py-3.5 text-muted-foreground lg:table-cell">{t.client?.name ?? "—"}</td>
+                    <td className="hidden max-w-[160px] truncate px-3 py-3.5 text-muted-foreground lg:table-cell">
+                      <HighlightMatch text={t.client?.name ?? "—"} query={search} />
+                    </td>
                     <td className="hidden px-3 py-3.5 text-muted-foreground md:table-cell">{t.paymentMethod}</td>
                     <td className={cn("num whitespace-nowrap px-3 py-3.5 text-right font-semibold", t.type === "INCOME" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
                       {t.type === "INCOME" ? "+" : "−"}{fmtMoney(t.amount, currency)}

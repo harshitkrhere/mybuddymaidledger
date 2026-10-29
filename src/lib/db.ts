@@ -78,7 +78,7 @@ export const db =
     log: ["error"],
   })
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = db
+globalForPrisma.prisma = db
 
 // One-line, credential-free banner — proves which engine booted.
 if (!process.env.LEDGER_DB_ANNOUNCED) {

@@ -23,7 +23,9 @@ import {
   Users as UsersIcon,
   Wallet,
   X,
+  Search,
 } from "lucide-react"
+import { SpotlightDialog } from "./spotlight"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -57,6 +59,7 @@ export function PortalShell({
   children: React.ReactNode
 }) {
   const { theme, setTheme } = useTheme()
+  const [spotlightOpen, setSpotlightOpen] = useState(false)
   const { data: badgeData } = useApi<{ pendingCount: number }>(`/api/expenses?status=PENDING&badge=1&_=${badgeTick}`)
 
   const nav = useMemo(() => {
@@ -209,7 +212,22 @@ export function PortalShell({
             )}
           </div>
 
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSpotlightOpen(true)}
+              className="press flex h-9 items-center gap-2 rounded-xl border border-black/8 bg-muted/40 px-3 text-[13px] text-muted-foreground transition-all hover:border-black/15 hover:bg-muted/70 hover:text-foreground dark:border-white/10 dark:hover:border-white/20 sm:w-60"
+              title="Search everything (Cmd+K)"
+            >
+              <Search className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+              <span className="hidden sm:inline">Search anything…</span>
+              <span className="inline sm:hidden">Search…</span>
+              <kbd className="ml-auto hidden rounded border border-border/80 bg-background/80 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground/80 sm:inline-block">
+                ⌘K
+              </kbd>
+            </button>
+
+            <div className="flex items-center gap-1.5">
             <button
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
               title="Toggle appearance"
@@ -256,6 +274,7 @@ export function PortalShell({
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+            </div>
           </div>
         </header>
 
@@ -273,6 +292,15 @@ export function PortalShell({
             </motion.div>
           </AnimatePresence>
         </main>
+
+        <SpotlightDialog
+          open={spotlightOpen}
+          onOpenChange={setSpotlightOpen}
+          onNavigate={(targetView) => {
+            setView(targetView)
+          }}
+          me={me}
+        />
       </div>
     </div>
   )
