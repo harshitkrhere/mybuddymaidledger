@@ -1,113 +1,149 @@
-'use client';
+"use client"
 
-import { useCallback, useEffect, useState } from 'react';
-import { AnimatePresence } from 'framer-motion';
-import {
-  Sidebar,
-  MobileTabBar,
-  MoreSheet,
-  Toolbar,
-  LargeTitle,
-  PageTransition,
-  SpotlightSearch,
-  AccountingTabs,
-  type PageId,
-} from '@/components/erp/shell';
-import { Dashboard } from '@/components/erp/dashboard';
-import { PlanSales } from '@/components/erp/plan-sales';
-import { Customers } from '@/components/erp/customers';
-import { Helpers } from '@/components/erp/helpers';
-import { Placements } from '@/components/erp/placements';
-import { Expenses } from '@/components/erp/expenses';
-import { ChartOfAccounts } from '@/components/erp/chart-of-accounts';
-import { Journal } from '@/components/erp/journal';
-import { Reports } from '@/components/erp/reports';
-import { Settings } from '@/components/erp/settings';
+// ============================================================
+// Ledger — internal Accounting & Finance Portal.
+// Single-page application: login screen when signed out,
+// role-aware workspace when signed in. There is no signup;
+// accounts are created by Red/Admin from the Team module.
+// ============================================================
+
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { ThemeProvider } from "next-themes"
+import { Loader2 } from "lucide-react"
+import { Toaster } from "sonner"
+import { LoginScreen } from "@/components/portal/login"
+import { PortalShell } from "@/components/portal/shell"
+import { CompanyContext, api, type Me, type ViewId } from "@/components/portal/shared"
+import { DashboardView } from "@/components/portal/dashboard"
+import { TransactionsView } from "@/components/portal/transactions"
+import { InvoicesView } from "@/components/portal/invoices"
+import { ExpensesView } from "@/components/portal/expenses"
+import { ClientsView } from "@/components/portal/clients"
+import { ReportsView } from "@/components/portal/reports"
+import { TeamView } from "@/components/portal/team"
+import { AuditView } from "@/components/portal/audit"
+import { SettingsView } from "@/components/portal/settings"
 
 export default function Home() {
-  const [page, setPage] = useState<PageId>('dashboard');
-  const [scrolled, setScrolled] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
+  return (
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
+      <App />
+      <Toaster
+        position="top-center"
+        toastOptions={{
+          style: {
+            borderRadius: "14px",
+            border: "1px solid rgba(0,0,0,0.06)",
+            boxShadow: "0 12px 32px -12px rgba(0,0,0,0.18)",
+            fontSize: "13.5px",
+          },
+        }}
+      />
+    </ThemeProvider>
+  )
+}
 
-  // large-title compaction on scroll
+function App() {
+  const [booting, setBooting] = useState(true)
+  const [me, setMe] = useState<Me | null>(null)
+  const [view, setView] = useState<ViewId>("dashboard")
+  const [badgeTick, setBadgeTick] = useState(0)
+
+  const fetchMe = useCallback(async (): Promise<Me | null> => {
+    try {
+      return await api<Me>("/api/auth/me")
+    } catch {
+      return null
+    }
+  }, [])
+
+  const refreshMe = useCallback(async () => {
+    const data = await fetchMe()
+    setMe(data)
+    return data
+  }, [fetchMe])
+
   useEffect(() => {
-    let raf = 0;
-    const onScroll = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => setScrolled(window.scrollY > 72));
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
+    let active = true
+    void fetchMe().then((data) => {
+      if (!active) return
+      setMe(data)
+      setBooting(false)
+    })
     return () => {
-      window.removeEventListener('scroll', onScroll);
-      cancelAnimationFrame(raf);
-    };
-  }, []);
+      active = false
+    }
+  }, [fetchMe])
 
-  // ⌘K / Ctrl+K toggles spotlight; Esc closes it
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSearchOpen((o) => !o);
-      } else if (e.key === 'Escape') {
-        setSearchOpen(false);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  const onMutation = useCallback(() => {
+    setBadgeTick((t) => t + 1)
+  }, [])
 
-  const navigate = useCallback((p: string) => {
-    setPage(p as PageId);
-    setMoreOpen(false);
-    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
-  }, []);
+  // Guard: if the current view isn't permitted after a role change, land on dashboard.
+  const effectiveView = useMemo<ViewId>(() => {
+    if (!me) return "dashboard"
+    const cap = me.capabilities
+    const allowed: Record<ViewId, boolean> = {
+      dashboard: true,
+      transactions: cap.canManageFinance,
+      invoices: cap.canManageFinance,
+      expenses: true,
+      clients: cap.canManageFinance,
+      reports: cap.canManageFinance,
+      team: cap.canManageUsers,
+      audit: cap.canViewAudit,
+      settings: true,
+    }
+    return allowed[view] ? view : "dashboard"
+  }, [me, view])
 
-  // global "New Sale" — jumps to Plan Sales and opens the record dialog
-  const newSale = useCallback(() => {
-    navigate('plan-sales');
-    window.setTimeout(() => window.dispatchEvent(new CustomEvent('mbm:new-plan-sale')), 420);
-  }, [navigate]);
+  const companyValue = useMemo(
+    () => ({
+      currency: me?.company?.currency ?? "INR",
+      companyName: me?.company?.companyName ?? "My Company",
+    }),
+    [me]
+  )
+
+  if (booting) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex h-13 w-13 items-center justify-center rounded-[14px] bg-gradient-to-b from-[#0a84ff] to-[#0071e3] shadow-lg shadow-[#0071e3]/25" style={{ height: 52, width: 52 }}>
+            <Loader2 className="h-6 w-6 animate-spin text-white" />
+          </div>
+          <p className="text-[13px] text-muted-foreground">Opening your ledger…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!me) {
+    return <LoginScreen onLoggedIn={() => void refreshMe()} />
+  }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Sidebar page={page} onNavigate={navigate} />
-
-      <div className="flex min-h-screen flex-col lg:pl-[248px]">
-        <Toolbar page={page} scrolled={scrolled} onOpenSearch={() => setSearchOpen(true)} onNew={newSale} />
-
-        <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 pb-28 pt-0 sm:px-6 lg:px-8 lg:pb-16">
-          <LargeTitle page={page} />
-
-          {(page === 'accounts' || page === 'journal') && (
-            <div className="pb-5">
-              <AccountingTabs active={page === 'journal' ? 'journal' : 'accounts'} onNavigate={navigate} />
-            </div>
-          )}
-
-          <PageTransition pageKey={page}>
-            {page === 'dashboard' && <Dashboard onNavigate={navigate} />}
-            {page === 'plan-sales' && <PlanSales />}
-            {page === 'customers' && <Customers />}
-            {page === 'helpers' && <Helpers />}
-            {page === 'placements' && <Placements />}
-            {page === 'expenses' && <Expenses />}
-            {page === 'accounts' && <ChartOfAccounts />}
-            {page === 'journal' && <Journal />}
-            {page === 'reports' && <Reports />}
-            {page === 'settings' && <Settings />}
-          </PageTransition>
-        </main>
-      </div>
-
-      <MobileTabBar page={page} onNavigate={navigate} onOpenMore={() => setMoreOpen(true)} />
-      <MoreSheet open={moreOpen} onOpenChange={setMoreOpen} page={page} onNavigate={navigate} />
-      <AnimatePresence>
-        {searchOpen && (
-          <SpotlightSearch key="spotlight" open={searchOpen} onClose={() => setSearchOpen(false)} onNavigate={navigate} />
-        )}
-      </AnimatePresence>
-    </div>
-  );
+    <CompanyContext.Provider value={companyValue}>
+      <PortalShell
+        me={me}
+        view={effectiveView}
+        setView={setView}
+        onLogout={() => {
+          setMe(null)
+          setView("dashboard")
+        }}
+        badgeTick={badgeTick}
+      >
+        {effectiveView === "dashboard" && <DashboardView me={me} onMutation={onMutation} />}
+        {effectiveView === "transactions" && <TransactionsView me={me} onMutation={onMutation} />}
+        {effectiveView === "invoices" && <InvoicesView me={me} onMutation={onMutation} />}
+        {effectiveView === "expenses" && <ExpensesView me={me} onMutation={onMutation} />}
+        {effectiveView === "clients" && <ClientsView me={me} onMutation={onMutation} />}
+        {effectiveView === "reports" && <ReportsView />}
+        {effectiveView === "team" && <TeamView me={me} onMutation={onMutation} />}
+        {effectiveView === "audit" && <AuditView />}
+        {effectiveView === "settings" && <SettingsView me={me} onProfileSaved={() => void refreshMe()} />}
+      </PortalShell>
+    </CompanyContext.Provider>
+  )
 }

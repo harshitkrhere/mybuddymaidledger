@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "@/components/ui/toaster";
 
 // Inter is metrically compatible with SF Pro Text — Apple devices render SF,
 // everything else gets a visually indistinguishable substitute.
@@ -12,16 +11,17 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: {
-    default: "MyBuddyMaid — Business Operations",
-    template: "%s · MyBuddyMaid",
-  },
+  title: "Ledger — Accounting & Finance",
   description:
-    "Operations and accounting for MyBuddyMaid: plan sales with GST, customers, verified helpers, placements and financial reports — in one clean workspace.",
+    "Internal accounting & finance portal: transactions, invoices, expenses, approvals, reports and role-based access — Red, Admin, Manager, Employee.",
+  robots: { index: false, follow: false }, // internal system: keep it out of search
 };
 
 export const viewport: Viewport = {
-  themeColor: "#f5f5f7",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f5f5f7" },
+    { media: "(prefers-color-scheme: dark)", color: "#1c1c1e" },
+  ],
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -36,7 +36,6 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} antialiased bg-background text-foreground`}>
         {children}
-        <Toaster />
       </body>
     </html>
   );

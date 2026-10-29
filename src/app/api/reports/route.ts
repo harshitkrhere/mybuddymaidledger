@@ -1,148 +1,117 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { getAccountBalances, money } from '@/lib/accounting';
+import { db } from "@/lib/db"
+import { ok, requireModule } from "@/lib/api-helpers"
 
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const type = searchParams.get('type') || 'pl'; // pl | balance | trial
+// ============================================================
+// /api/reports — P&L, category breakdown, cash-flow trend.
+// Pass ?format=csv to download the ledger as CSV.
+// ============================================================
 
-    const balances = await getAccountBalances();
+export async function GET(req: Request) {
+  const guard = await requireModule("reports")
+  if ("response" in guard) return guard.response
 
-    if (type === 'trial') {
-      // Trial balance: all accounts with debit/credit columns
-      const rows = balances
-        .filter((b) => b.debitTotal !== 0 || b.creditTotal !== 0)
-        .map((b) => ({
-          code: b.code,
-          name: b.name,
-          type: b.type,
-          debit: b.debitTotal > b.creditTotal ? money(b.debitTotal - b.creditTotal) : 0,
-          credit: b.creditTotal > b.debitTotal ? money(b.creditTotal - b.debitTotal) : 0,
-          rawDebit: b.debitTotal,
-          rawCredit: b.creditTotal,
-        }));
-      const totalDebit = money(rows.reduce((s, r) => s + r.debit, 0));
-      const totalCredit = money(rows.reduce((s, r) => s + r.credit, 0));
-      return NextResponse.json({
-        type: 'trial',
-        rows,
-        totalDebit,
-        totalCredit,
-        balanced: Math.abs(totalDebit - totalCredit) < 0.01,
-      });
-    }
+  const url = new URL(req.url)
+  const fromParam = url.searchParams.get("from")
+  const toParam = url.searchParams.get("to")
 
-    if (type === 'balance') {
-      const assets = balances.filter((b) => b.type === 'ASSET');
-      const liabilities = balances.filter((b) => b.type === 'LIABILITY');
-      const equity = balances.filter((b) => b.type === 'EQUITY');
-      const revenue = balances.filter((b) => b.type === 'REVENUE');
-      const expenses = balances.filter((b) => b.type === 'EXPENSE');
+  const now = new Date()
+  const from = fromParam ? new Date(fromParam) : new Date(now.getFullYear(), 0, 1)
+  const to = toParam ? new Date(`${toParam}T23:59:59`) : new Date(now.getFullYear(), 11, 31, 23, 59, 59)
 
-      const totalRevenue = money(revenue.reduce((s, b) => s + b.balance, 0));
-      const totalExpenses = money(expenses.reduce((s, b) => s + b.balance, 0));
-      const netIncome = money(totalRevenue - totalExpenses);
+  // ---------------- CSV export ----------------
+  if (url.searchParams.get("format") === "csv") {
+    const rows = await db.transaction.findMany({
+      where: { date: { gte: from, lte: to } },
+      orderBy: { date: "asc" },
+      include: { category: true, client: { select: { name: true } } },
+    })
 
-      // contra accounts: equity balances are already "normal side" positive
-      const totalAssets = money(assets.reduce((s, b) => s + b.balance, 0));
-      const totalLiabilities = money(liabilities.reduce((s, b) => s + b.balance, 0));
-      const totalEquity = money(equity.reduce((s, b) => s + b.balance, 0) + netIncome);
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"` // RFC 4180
+    const header = ["Date", "Type", "Description", "Category", "Party", "Reference", "Method", "Amount"]
+      .map(esc)
+      .join(",")
+    const lines = rows.map((r) =>
+      [
+        r.date.toISOString().slice(0, 10),
+        r.type,
+        r.description,
+        r.category?.name ?? "Uncategorized",
+        r.client?.name ?? "",
+        r.reference ?? "",
+        r.paymentMethod,
+        String(r.amount),
+      ]
+        .map((v) => esc(String(v)))
+        .join(",")
+    )
+    const csv = [header, ...lines].join("\n")
 
-      return NextResponse.json({
-        type: 'balance',
-        assets: assets.filter((a) => a.balance !== 0 || a.isActive),
-        liabilities: liabilities.filter((a) => a.balance !== 0 || a.isActive),
-        equity,
-        netIncome,
-        totalRevenue,
-        totalExpenses,
-        totalAssets,
-        totalLiabilities,
-        totalEquity,
-        balanced: Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01,
-      });
-    }
-
-    // default: profit & loss (optionally restricted to a date range)
-    const fromParam = searchParams.get('from');
-    const toParam = searchParams.get('to');
-    const from = fromParam ? new Date(`${fromParam}T00:00:00`) : undefined;
-    const to = toParam ? new Date(`${toParam}T00:00:00`) : undefined;
-    to?.setDate(to.getDate() + 1); // inclusive end date
-
-    const rangeBalances =
-      from || to ? await getAccountBalances({ from, to }) : balances;
-
-    const revenue = rangeBalances.filter((b) => b.type === 'REVENUE' && b.balance !== 0);
-    const expenses = rangeBalances.filter((b) => b.type === 'EXPENSE' && b.balance !== 0);
-    const totalRevenue = money(revenue.reduce((s, b) => s + b.balance, 0));
-    const totalExpenses = money(expenses.reduce((s, b) => s + b.balance, 0));
-    const netIncome = money(totalRevenue - totalExpenses);
-
-    // monthly breakdown — inside the range if given (max 12 months), else last 6
-    const months: { label: string; revenue: number; expenses: number; net: number }[] = [];
-    let cursor: Date;
-    let monthCount: number;
-    if (from || to) {
-      const rangeStart = from ?? new Date(to!.getFullYear(), to!.getMonth() - 11, 1);
-      const rangeEnd = to ?? new Date();
-      monthCount = Math.min(
-        12,
-        (rangeEnd.getFullYear() - rangeStart.getFullYear()) * 12 +
-          (rangeEnd.getMonth() - rangeStart.getMonth()) +
-          1
-      );
-      cursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
-    } else {
-      monthCount = 6;
-      const now = new Date();
-      cursor = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-    }
-
-    for (let i = 0; i < monthCount; i++) {
-      const start = new Date(cursor.getFullYear(), cursor.getMonth() + i, 1);
-      const end = new Date(cursor.getFullYear(), cursor.getMonth() + i + 1, 1);
-      const entries = await db.journalEntry.findMany({
-        where: { date: { gte: start, lt: end }, isPosted: true },
-        include: { lines: { include: { account: true } } },
-      });
-      let rev = 0;
-      let exp = 0;
-      for (const e of entries) {
-        for (const l of e.lines) {
-          if (l.account.type === 'REVENUE') rev += l.credit - l.debit;
-          if (l.account.type === 'EXPENSE') exp += l.debit - l.credit;
-        }
-      }
-      months.push({
-        label: start.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }),
-        revenue: money(rev),
-        expenses: money(exp),
-        net: money(rev - exp),
-      });
-    }
-
-    return NextResponse.json({
-      type: 'pl',
-      range: {
-        from: fromParam || null,
-        to: toParam || null,
-        label:
-          fromParam || toParam
-            ? `${fromParam ?? 'beginning'} → ${toParam ?? 'today'}`
-            : 'All time',
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="ledger-${from.toISOString().slice(0, 10)}-to-${to.toISOString().slice(0, 10)}.csv"`,
       },
-      revenue,
-      expenses,
-      totalRevenue,
-      totalExpenses,
-      netIncome,
-      margin: totalRevenue > 0 ? money((netIncome / totalRevenue) * 100) : 0,
-      months,
-    });
-  } catch (error) {
-    console.error('Reports API error:', error);
-    return NextResponse.json({ error: 'Failed to generate report' }, { status: 500 });
+    })
   }
+
+  // ---------------- Aggregate report ----------------
+  const [incomeByCat, expenseByCat, monthly] = await Promise.all([
+    db.transaction.groupBy({
+      by: ["type", "categoryId"],
+      where: { type: "INCOME", date: { gte: from, lte: to } },
+      _sum: { amount: true },
+      orderBy: { _sum: { amount: "desc" } },
+    }),
+    db.transaction.groupBy({
+      by: ["categoryId"],
+      where: { type: "EXPENSE", date: { gte: from, lte: to } },
+      _sum: { amount: true },
+      orderBy: { _sum: { amount: "desc" } },
+    }),
+    db.transaction.findMany({
+      where: { date: { gte: from, lte: to } },
+      select: { date: true, type: true, amount: true },
+    }),
+  ])
+
+  const catIds = [...incomeByCat.map((g) => g.categoryId), ...expenseByCat.map((g) => g.categoryId)].filter(
+    Boolean
+  ) as string[]
+  const categories = await db.category.findMany({ where: { id: { in: catIds } } })
+  const nameOf = (id: string | null) => categories.find((c) => c.id === id)?.name ?? "Uncategorized"
+
+  const totalIncome = incomeByCat.reduce((s, g) => s + (g._sum.amount ?? 0), 0)
+  const totalExpense = expenseByCat.reduce((s, g) => s + (g._sum.amount ?? 0), 0)
+
+  // Month buckets across the selected window
+  const buckets: { month: string; income: number; expense: number; net: number }[] = []
+  const cursor = new Date(from.getFullYear(), from.getMonth(), 1)
+  while (cursor <= to) {
+    const start = new Date(cursor)
+    const end = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59)
+    const inRange = monthly.filter((t) => t.date >= start && t.date <= end)
+    const income = inRange.filter((t) => t.type === "INCOME").reduce((s, t) => s + t.amount, 0)
+    const expense = inRange.filter((t) => t.type === "EXPENSE").reduce((s, t) => s + t.amount, 0)
+    buckets.push({
+      month: start.toLocaleString("en-US", { month: "short", year: "2-digit" }),
+      income,
+      expense,
+      net: income - expense,
+    })
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+
+  return ok({
+    range: { from: from.toISOString(), to: to.toISOString() },
+    summary: {
+      totalIncome,
+      totalExpense,
+      net: totalIncome - totalExpense,
+      margin: totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0,
+      transactions: monthly.length,
+    },
+    incomeByCategory: incomeByCat.map((g) => ({ name: nameOf(g.categoryId), amount: g._sum.amount ?? 0 })),
+    expenseByCategory: expenseByCat.map((g) => ({ name: nameOf(g.categoryId), amount: g._sum.amount ?? 0 })),
+    monthly: buckets,
+  })
 }

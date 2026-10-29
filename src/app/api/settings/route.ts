@@ -1,64 +1,130 @@
-import { NextRequest, NextResponse } from 'next/server';
-import {
-  DEFAULT_SETTINGS,
-  getSettings,
-  upsertSettings,
-  SettingsKey,
-} from '@/lib/accounting';
+import bcrypt from "bcryptjs"
+import { db } from "@/lib/db"
+import { audit } from "@/lib/auth"
+import { fail, ok, readJson, requireUser } from "@/lib/api-helpers"
+import { canEditCompanySettings } from "@/lib/permissions"
+
+// ============================================================
+// /api/settings — profile & password (everyone) and company
+// settings (Red only, enforced server-side).
+// ============================================================
 
 export async function GET() {
-  try {
-    const settings = await getSettings();
-    return NextResponse.json({ settings });
-  } catch (error) {
-    console.error('Settings GET error:', error);
-    return NextResponse.json({ error: 'Failed to load settings' }, { status: 500 });
-  }
+  const guard = await requireUser()
+  if ("response" in guard) return guard.response
+
+  const settings = await db.companySettings.findUnique({ where: { id: "singleton" } })
+  return ok({
+    profile: {
+      name: guard.user.name,
+      email: guard.user.email,
+      role: guard.user.role,
+      title: guard.user.title,
+      createdAt: (await db.user.findUnique({ where: { id: guard.user.id }, select: { createdAt: true } }))?.createdAt,
+    },
+    company: settings,
+    canEditCompany: canEditCompanySettings(guard.user.role),
+  })
 }
 
-export async function PUT(request: NextRequest) {
-  try {
-    const body = await request.json();
+type SettingsBody = {
+  action?: "profile" | "password" | "company"
+  name?: string
+  title?: string
+  currentPassword?: string
+  newPassword?: string
+  companyName?: string
+  currency?: string
+  taxRate?: number
+  email?: string
+  phone?: string
+  address?: string
+}
 
-    // validate + coerce each field against its default type
-    const values: Partial<Record<SettingsKey, string | number>> = {};
+export async function PATCH(req: Request) {
+  const guard = await requireUser()
+  if ("response" in guard) return guard.response
+  const user = guard.user
 
-    for (const key of Object.keys(DEFAULT_SETTINGS) as SettingsKey[]) {
-      if (!(key in body)) continue;
-      const raw = body[key];
-      if (raw == null) continue;
+  const body = await readJson<SettingsBody>(req)
+  if (!body?.action) return fail(400, "Missing action.")
 
-      if (typeof DEFAULT_SETTINGS[key] === 'number') {
-        if (raw === '') continue; // empty numeric field falls back to default
-        const n = Number(raw);
-        if (isNaN(n) || n < 0) {
-          return NextResponse.json({ error: `${key} must be a non-negative number.` }, { status: 400 });
-        }
-        if (key === 'defaultGstRate' && n > 100) {
-          return NextResponse.json({ error: 'GST rate cannot exceed 100%.' }, { status: 400 });
-        }
-        values[key] = n;
-      } else {
-        // empty string explicitly clears a text field (e.g. GSTIN when unregistered)
-        const s = String(raw).trim();
-        if (key === 'gstin' && s && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[0-9A-Z]{1}[Z]{1}[0-9A-Z]{1}$/i.test(s)) {
-          return NextResponse.json(
-            { error: 'GSTIN format looks invalid (expected 15 chars, e.g. 07ABCDE1234F1Z5). Leave blank if unregistered.' },
-            { status: 400 }
-          );
-        }
-        values[key] = s;
-      }
-    }
+  // ---------- Profile ----------
+  if (body.action === "profile") {
+    const name = (body.name ?? "").trim()
+    const title = (body.title ?? "").trim() || null
+    if (!name) return fail(400, "Name cannot be empty.")
 
-    if (Object.keys(values).length === 0) {
-      return NextResponse.json({ error: 'No valid settings provided.' }, { status: 400 });
-    }
-
-    const settings = await upsertSettings(values);
-    return NextResponse.json({ settings });
-  } catch (error) {
-    console.error('Settings PUT error:', error);
-    return NextResponse.json({ error: 'Failed to save settings' }, { status: 500 });
+    await db.user.update({ where: { id: user.id }, data: { name, title } })
+    await audit({
+      actorId: user.id,
+      action: "PROFILE_UPDATED",
+      targetType: "USER",
+      targetId: user.id,
+      targetLabel: user.email,
+      detail: { name, title },
+    })
+    return ok({ ok: true })
   }
+
+  // ---------- Password change (self, current password required) ----------
+  if (body.action === "password") {
+    const current = body.currentPassword ?? ""
+    const next = body.newPassword ?? ""
+    if (next.length < 8) return fail(400, "New passwords must be at least 8 characters.")
+
+    const me = await db.user.findUnique({ where: { id: user.id } })
+    if (!me) return fail(404, "Account not found.")
+    const matches = await bcrypt.compare(current, me.passwordHash)
+    if (!matches) return fail(400, "Your current password is incorrect.")
+
+    const passwordHash = await bcrypt.hash(next, 10)
+    await db.user.update({ where: { id: user.id }, data: { passwordHash } })
+    await audit({
+      actorId: user.id,
+      action: "PASSWORD_CHANGED",
+      targetType: "USER",
+      targetId: user.id,
+      targetLabel: user.email,
+    })
+    return ok({ ok: true })
+  }
+
+  // ---------- Company settings (Red only) ----------
+  if (body.action === "company") {
+    if (!canEditCompanySettings(user.role)) {
+      await audit({
+        actorId: user.id,
+        action: "SETTINGS_CHANGE_BLOCKED",
+        targetType: "SETTINGS",
+        detail: { attemptedBy: user.role },
+      })
+      return fail(403, "Only Red can change company settings.")
+    }
+
+    const data: Record<string, unknown> = {}
+    if (body.companyName !== undefined) data.companyName = body.companyName.trim() || "My Company"
+    if (body.currency !== undefined) data.currency = ["INR", "USD", "EUR", "GBP", "AED", "SGD"].includes(body.currency) ? body.currency : "INR"
+    if (body.taxRate !== undefined) data.taxRate = Math.min(100, Math.max(0, Number(body.taxRate) || 0))
+    if (body.email !== undefined) data.email = body.email.trim() || null
+    if (body.phone !== undefined) data.phone = body.phone.trim() || null
+    if (body.address !== undefined) data.address = body.address.trim() || null
+
+    const settings = await db.companySettings.upsert({
+      where: { id: "singleton" },
+      update: data,
+      create: { id: "singleton", ...data },
+    })
+
+    await audit({
+      actorId: user.id,
+      action: "SETTINGS_UPDATED",
+      targetType: "SETTINGS",
+      targetLabel: settings.companyName,
+      detail: data,
+    })
+    return ok({ settings })
+  }
+
+  return fail(400, "Unsupported action.")
 }

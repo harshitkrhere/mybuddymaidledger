@@ -1,176 +1,127 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import {
-  EXPENSE_CATEGORIES,
-  EXPENSE_CATEGORY_ACCOUNT,
-  ACCOUNT_CODE,
-  createJournalEntry,
-  getAccountByCode,
-  money,
-} from '@/lib/accounting';
+import { db } from "@/lib/db"
+import { audit } from "@/lib/auth"
+import { fail, ok, readJson, requireUser } from "@/lib/api-helpers"
+import { canApproveExpenses, canManageFinance } from "@/lib/permissions"
 
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const category = searchParams.get('category');
+// ============================================================
+// /api/expenses — everyone can submit their own expenses.
+// Approvers (Red / Admin / Manager) review submissions.
+// Employees only ever see their own records.
+// ============================================================
 
-    const expenses = await db.expense.findMany({
-      where: category && category !== 'ALL' ? { category } : undefined,
-      orderBy: { date: 'desc' },
-    });
+const PAGE_SIZE = 10
 
-    const result = expenses.map((e) => ({
-      id: e.id,
-      date: e.date,
-      description: e.description,
-      amount: money(e.amount),
-      category: e.category,
-      paymentMode: e.paymentMode,
-      vendor: e.vendor,
-    }));
+export async function GET(req: Request) {
+  const guard = await requireUser()
+  if ("response" in guard) return guard.response
+  const user = guard.user
+  const isApprover = canApproveExpenses(user.role)
 
-    const total = money(result.reduce((s, e) => s + e.amount, 0));
-    const categories = Array.from(new Set(result.map((e) => e.category))).sort();
-    return NextResponse.json({ expenses: result, total, categories });
-  } catch (error) {
-    console.error('Expenses GET error:', error);
-    return NextResponse.json({ error: 'Failed to load expenses' }, { status: 500 });
-  }
-}
+  const url = new URL(req.url)
+  const status = url.searchParams.get("status")
+  const categoryId = url.searchParams.get("categoryId")
+  const submittedById = url.searchParams.get("submittedById")
+  const search = (url.searchParams.get("q") ?? "").trim()
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1)
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { date, description, amount, category, paymentMode, vendor } = body;
+  const where: Record<string, unknown> = {}
+  // Employees are hard-scoped to their own submissions.
+  if (!isApprover) where.submittedById = user.id
+  else if (submittedById) where.submittedById = submittedById
+  if (status && ["PENDING", "APPROVED", "REJECTED"].includes(status)) where.status = status
+  if (categoryId) where.categoryId = categoryId
+  if (search) where.description = { contains: search }
 
-    if (!date || !description || !amount || Number(amount) <= 0) {
-      return NextResponse.json(
-        { error: 'Date, description and a positive amount are required.' },
-        { status: 400 }
-      );
-    }
-    const cat = EXPENSE_CATEGORIES.includes(category) ? category : 'Other';
-    const mode = ['UPI', 'BANK', 'CASH', 'CARD'].includes(paymentMode) ? paymentMode : 'BANK';
-
-    // Expense + auto-posted journal entry must commit or roll back together
-    const created = await db.$transaction(async (tx) => {
-      const expense = await tx.expense.create({
-        data: {
-          date: new Date(date),
-          description,
-          amount: money(Number(amount)),
-          category: cat,
-          paymentMode: mode,
-          vendor: vendor || null,
-        },
-      });
-
-      // auto-post journal entry: expense debit, payment account credit
-      const expenseCode = EXPENSE_CATEGORY_ACCOUNT[expense.category] || '5700';
-      const expenseAccount = await getAccountByCode(expenseCode, tx);
-      const paymentAccount = await getAccountByCode(
-        expense.paymentMode === 'CASH' ? ACCOUNT_CODE.CASH : ACCOUNT_CODE.BANK,
-        tx
-      );
-      if (!expenseAccount || !paymentAccount) {
-        throw Object.assign(new Error('Chart of accounts incomplete.'), { status: 500 });
-      }
-
-      const entry = await createJournalEntry(
-        {
-          date: expense.date,
-          memo: `Expense — ${expense.description}`,
-          reference: `EXP-${expense.id.slice(0, 8)}`,
-          source: 'EXPENSE',
-          lines: [
-            { accountId: expenseAccount.id, debit: expense.amount, memo: expense.category },
-            { accountId: paymentAccount.id, credit: expense.amount, memo: 'Paid' },
-          ],
-        },
-        tx
-      );
-
-      return { expense, entryId: entry.id, entryNumber: entry.entryNumber };
-    });
-
-    return NextResponse.json(
-      {
-        expense: created.expense,
-        journalEntry: { id: created.entryId, entryNumber: created.entryNumber },
+  const [total, expenses, categories, submitters, pendingCount] = await Promise.all([
+    db.expense.count({ where }),
+    db.expense.findMany({
+      where,
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      include: {
+        category: true,
+        submitter: { select: { id: true, name: true, role: true } },
+        reviewer: { select: { id: true, name: true } },
       },
-      { status: 201 }
-    );
-  } catch (error: unknown) {
-    const status = (error as { status?: number }).status || 500;
-    const message = error instanceof Error ? error.message : 'Failed to create expense';
-    console.error('Expenses POST error:', message);
-    return NextResponse.json({ error: message }, { status });
-  }
+    }),
+    db.category.findMany({ where: { isActive: true, type: "EXPENSE" }, orderBy: { name: "asc" } }),
+    isApprover
+      ? db.user.findMany({
+          where: { status: "ACTIVE" },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true, role: true },
+        })
+      : Promise.resolve([]),
+    db.expense.count({ where: isApprover ? { status: "PENDING" } : { status: "PENDING", submittedById: user.id } }),
+  ])
+
+  // Totals across the active filter.
+  const totals = await db.expense.groupBy({
+    by: ["status"],
+    where,
+    _sum: { amount: true },
+  })
+  const sumOf = (s: string) => totals.find((t) => t.status === s)?._sum.amount ?? 0
+
+  return ok({
+    expenses,
+    categories,
+    submitters,
+    isApprover,
+    pendingCount,
+    pagination: { page, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)), total },
+    totals: {
+      pending: sumOf("PENDING"),
+      approved: sumOf("APPROVED"),
+      rejected: sumOf("REJECTED"),
+    },
+  })
 }
 
-export async function DELETE(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    if (!id) {
-      return NextResponse.json({ error: 'Missing id.' }, { status: 400 });
-    }
+type ExpenseBody = {
+  date?: string
+  amount?: number
+  description?: string
+  categoryId?: string | null
+  receiptRef?: string | null
+}
 
-    // Deleting an expense must also reverse its auto-posted journal entry,
-    // otherwise the ledger silently overstates expenses forever.
-    const result = await db.$transaction(async (tx) => {
-      const expense = await tx.expense.findFirst({ where: { id } });
-      if (!expense) {
-        throw Object.assign(new Error('Expense not found.'), { status: 404 });
-      }
+export async function POST(req: Request) {
+  const guard = await requireUser()
+  if ("response" in guard) return guard.response
+  const user = guard.user
 
-      // find the auto-posted entry by its EXP- reference
-      const entry = await tx.journalEntry.findFirst({
-        where: { reference: `EXP-${expense.id.slice(0, 8)}`, source: 'EXPENSE' },
-        include: { lines: true },
-      });
+  const body = await readJson<ExpenseBody>(req)
+  if (!body) return fail(400, "Missing expense details.")
+  if (!body.date || isNaN(Date.parse(body.date))) return fail(400, "Please pick a valid date.")
+  if (!body.amount || body.amount <= 0) return fail(400, "Amount must be greater than zero.")
+  if (!(body.description ?? "").trim()) return fail(400, "Please describe the expense.")
 
-      if (entry && entry.isPosted) {
-        const paymentCode =
-          expense.paymentMode === 'CASH' ? ACCOUNT_CODE.CASH : ACCOUNT_CODE.BANK;
-        const paymentAccount = await getAccountByCode(paymentCode, tx);
-        const expenseCode = EXPENSE_CATEGORY_ACCOUNT[expense.category] || '5700';
-        const expenseAccount = await getAccountByCode(expenseCode, tx);
-        if (!paymentAccount || !expenseAccount) {
-          throw Object.assign(new Error('Chart of accounts incomplete.'), { status: 500 });
-        }
+  const expense = await db.expense.create({
+    data: {
+      submittedById: user.id,
+      date: new Date(body.date!),
+      amount: body.amount!,
+      description: body.description!.trim(),
+      categoryId: body.categoryId || null,
+      receiptRef: (body.receiptRef ?? "").trim() || null,
+    },
+    include: {
+      category: true,
+      submitter: { select: { id: true, name: true, role: true } },
+      reviewer: { select: { id: true, name: true } },
+    },
+  })
 
-        // Reversing entry: Dr payment account, Cr expense account
-        await createJournalEntry(
-          {
-            date: new Date(),
-            memo: `Reversal — deleted expense "${expense.description}" (${expense.category})`,
-            reference: `EXP-REV-${expense.id.slice(0, 8)}`,
-            source: 'EXPENSE',
-            lines: [
-              { accountId: paymentAccount.id, debit: expense.amount, memo: 'Reversal of payment' },
-              { accountId: expenseAccount.id, credit: expense.amount, memo: 'Reversal of expense' },
-            ],
-          },
-          tx
-        );
+  await audit({
+    actorId: user.id,
+    action: "EXPENSE_SUBMITTED",
+    targetType: "EXPENSE",
+    targetId: expense.id,
+    targetLabel: expense.description,
+    detail: { amount: expense.amount, date: expense.date },
+  })
 
-        // void the original entry so it stops contributing to balances
-        await tx.journalEntry.update({
-          where: { id: entry.id },
-          data: { isPosted: false },
-        });
-      }
-
-      await tx.expense.delete({ where: { id } });
-      return { reversed: Boolean(entry) };
-    });
-
-    return NextResponse.json({ success: true, reversed: result.reversed });
-  } catch (error: unknown) {
-    const status = (error as { status?: number }).status || 500;
-    const message = error instanceof Error ? error.message : 'Failed to delete expense';
-    console.error('Expenses DELETE error:', message);
-    return NextResponse.json({ error: message }, { status });
-  }
+  return ok({ expense }, 201)
 }

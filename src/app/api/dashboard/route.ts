@@ -1,226 +1,195 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { getAccountBalances, money, fiscalYearStart, fiscalYearLabel } from '@/lib/accounting';
+import { db } from "@/lib/db"
+import { ok, requireUser } from "@/lib/api-helpers"
+import { canApproveExpenses } from "@/lib/permissions"
 
-// Period presets: month = current calendar month, fy = Indian fiscal year (Apr–Mar), all = everything
-function periodRange(period: string): { from: Date | null; to: Date | null; label: string } {
-  const now = new Date();
-  if (period === 'month') {
-    return {
-      from: new Date(now.getFullYear(), now.getMonth(), 1),
-      to: null,
-      label: now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
-    };
-  }
-  if (period === 'fy') {
-    return { from: fiscalYearStart(now), to: null, label: fiscalYearLabel(now) };
-  }
-  return { from: null, to: null, label: 'All time' };
+// ============================================================
+// /api/dashboard — role-aware home view.
+// Finance roles get the full financial picture; employees get
+// a clean personal view of their own expense activity.
+// ============================================================
+
+function monthStart(d = new Date()) {
+  return new Date(d.getFullYear(), d.getMonth(), 1)
 }
 
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const period = ['month', 'fy', 'all'].includes(searchParams.get('period') || '')
-      ? (searchParams.get('period') as 'month' | 'fy' | 'all')
-      : 'all';
-
-    const range = periodRange(period);
-    const rangeWhere = {
-      isPosted: true,
-      ...(range.from || range.to
-        ? {
-            date: {
-              ...(range.from ? { gte: range.from } : {}),
-              ...(range.to ? { lt: range.to } : {}),
-            },
-          }
-        : {}),
-    };
-
-    // All-time balances (assets/liabilities are point-in-time, always full history)
-    const balances = await getAccountBalances();
-    const byType = (t: string) => balances.filter((b) => b.type === t && b.isActive);
-    const sum = (t: string) => money(byType(t).reduce((s, b) => s + b.balance, 0));
-
-    // Period-scoped revenue & expenses
-    const periodEntries = await db.journalEntry.findMany({
-      where: rangeWhere,
-      include: { lines: { include: { account: true } } },
-    });
-    let periodRevenue = 0;
-    let periodExpenses = 0;
-    for (const e of periodEntries) {
-      for (const l of e.lines) {
-        if (l.account.type === 'REVENUE') periodRevenue += l.credit - l.debit;
-        if (l.account.type === 'EXPENSE') periodExpenses += l.debit - l.credit;
-      }
-    }
-    periodRevenue = money(periodRevenue);
-    periodExpenses = money(periodExpenses);
-    const periodNetIncome = money(periodRevenue - periodExpenses);
-
-    const totalAssets = sum('ASSET');
-    const totalLiabilities = sum('LIABILITY');
-    const cash = money(
-      (balances.find((b) => b.code === '1010')?.balance ?? 0) +
-        (balances.find((b) => b.code === '1000')?.balance ?? 0)
-    );
-    const gstPayable = money(balances.find((b) => b.code === '2200')?.balance ?? 0);
-
-    // last 6 months revenue & expenses trend (independent of period selection)
-    const now = new Date();
-    const months: { key: string; label: string; revenue: number; expenses: number }[] = [];
-    for (let i = 5; i >= 0; i--) {
-      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
-      const entries = await db.journalEntry.findMany({
-        where: { date: { gte: start, lt: end }, isPosted: true },
-        include: { lines: { include: { account: true } } },
-      });
-      let revenue = 0;
-      let expenses = 0;
-      for (const e of entries) {
-        for (const l of e.lines) {
-          if (l.account.type === 'REVENUE') revenue += l.credit - l.debit;
-          if (l.account.type === 'EXPENSE') expenses += l.debit - l.credit;
-        }
-      }
-      months.push({
-        key: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`,
-        label: start.toLocaleDateString('en-IN', { month: 'short' }),
-        revenue: money(revenue),
-        expenses: money(expenses),
-      });
-    }
-
-    // plan mix by active customers
-    const customers = await db.customer.findMany();
-    const planMix = ['SILVER', 'GOLD', 'DIAMOND'].map((p) => ({
-      plan: p,
-      count: customers.filter((c) => c.planType === p && c.status === 'ACTIVE').length,
-    }));
-
-    // customers by city
-    const cityCounts: Record<string, number> = {};
-    for (const c of customers) cityCounts[c.city] = (cityCounts[c.city] || 0) + 1;
-    const cityMix = Object.entries(cityCounts)
-      .map(([city, count]) => ({ city, count }))
-      .sort((a, b) => b.count - a.count);
-
-    // expense breakdown within the selected period
-    const expenseRows = await db.expense.findMany({
-      where:
-        range.from || range.to
-          ? {
-              date: {
-                ...(range.from ? { gte: range.from } : {}),
-                ...(range.to ? { lt: range.to } : {}),
-              },
-            }
-          : undefined,
-    });
-    const categoryTotals: Record<string, number> = {};
-    for (const e of expenseRows) {
-      categoryTotals[e.category] = money((categoryTotals[e.category] || 0) + e.amount);
-    }
-    const expenseByCategory = Object.entries(categoryTotals)
-      .map(([category, total]) => ({ category, total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 6);
-
-    // operations stats
-    const [activePlans, activePlacements, availableHelpers, salesInPeriod, helpersAll, placementsAll, planSalesAll] =
-      await Promise.all([
-        db.customer.count({ where: { status: 'ACTIVE', planType: { not: null } } }),
-        db.placement.count({ where: { status: 'ACTIVE' } }),
-        db.helper.count({ where: { status: 'VERIFIED' } }),
-        db.planSale.count({
-          where: {
-            saleDate: {
-              ...(range.from ? { gte: range.from } : {}),
-              ...(range.to ? { lt: range.to } : {}),
-            },
-          },
-        }),
-        db.helper.findMany({ select: { city: true } }),
-        db.placement.findMany({
-          where: { status: 'ACTIVE' },
-          include: { customer: { select: { city: true } } },
-        }),
-        db.planSale.findMany({
-          where: { isRefunded: false },
-          include: { customer: { select: { city: true } } },
-        }),
-      ]);
-
-    // city operations — households, helpers, active placements & plan revenue per city
-    const cityOpsMap: Record<string, { city: string; customers: number; helpers: number; placements: number; revenue: number }> = {};
-    const cityEntry = (city: string) => (cityOpsMap[city] ??= { city, customers: 0, helpers: 0, placements: 0, revenue: 0 });
-    for (const c of customers) cityEntry(c.city).customers += 1;
-    for (const h of helpersAll) cityEntry(h.city).helpers += 1;
-    for (const p of placementsAll) cityEntry(p.customer.city).placements += 1;
-    for (const s of planSalesAll) cityEntry(s.customer.city).revenue = money(cityEntry(s.customer.city).revenue + s.feeAmount);
-    const cityOps = Object.values(cityOpsMap)
-      .map((o) => ({ ...o, revenue: money(o.revenue) }))
-      .sort((a, b) => b.revenue - a.revenue);
-
-    // recent ledger — cash impact per entry with a running balance walk-back from current cash
-    const recentEntries = await db.journalEntry.findMany({
-      where: { isPosted: true },
-      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-      take: 9,
-      include: { lines: { include: { account: true } } },
-    });
-    let runningBalance = cash;
-    const recentTransactions = recentEntries.map((e) => {
-      const cashDelta = money(
-        e.lines.reduce(
-          (s, l) => (l.account.code === '1000' || l.account.code === '1010' ? s + l.debit - l.credit : s),
-          0
-        )
-      );
-      const balanceAfter = runningBalance;
-      runningBalance = money(runningBalance - cashDelta);
-      return {
-        id: e.id,
-        entryNumber: e.entryNumber,
-        date: e.date,
-        memo: e.memo,
-        source: e.source,
-        amount: money(e.lines.reduce((s, l) => s + l.debit, 0)),
-        cashDelta,
-        balance: balanceAfter,
-      };
-    });
-
-    return NextResponse.json({
-      period: { key: period, label: range.label },
-      kpis: {
-        cash,
-        totalRevenue: periodRevenue,
-        totalExpenses: periodExpenses,
-        netIncome: periodNetIncome,
-        totalAssets,
-        totalLiabilities,
-        totalEquity: money(totalAssets - totalLiabilities),
-        gstPayable,
-        activePlans,
-        activePlacements,
-        availableHelpers,
-        customerCount: customers.length,
-        salesInPeriod,
-        monthRevenue: months[months.length - 1]?.revenue ?? 0,
-      },
-      months,
-      planMix,
-      cityMix,
-      cityOps,
-      expenseByCategory,
-      recentTransactions,
-    });
-  } catch (error) {
-    console.error('Dashboard API error:', error);
-    return NextResponse.json({ error: 'Failed to load dashboard' }, { status: 500 });
+function lastNMonths(n: number) {
+  const now = new Date()
+  const months: { label: string; start: Date; end: Date }[] = []
+  for (let i = n - 1; i >= 0; i--) {
+    const start = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59)
+    months.push({ label: start.toLocaleString("en-US", { month: "short" }), start, end })
   }
+  return months
+}
+
+export async function GET() {
+  const guard = await requireUser()
+  if ("response" in guard) return guard.response
+  const user = guard.user
+  const approver = canApproveExpenses(user.role)
+
+  // ---------------- Employee view ----------------
+  if (!approver) {
+    const monthStartNow = monthStart()
+    const [mine, monthMine, recent] = await Promise.all([
+      db.expense.groupBy({
+        by: ["status"],
+        where: { submittedById: user.id },
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
+      db.expense.findMany({
+        where: { submittedById: user.id, date: { gte: monthStartNow } },
+        select: { amount: true, status: true },
+      }),
+      db.expense.findMany({
+        where: { submittedById: user.id },
+        orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+        take: 6,
+        include: { category: true, reviewer: { select: { name: true } } },
+      }),
+    ])
+
+    const stat = (s: string) => mine.find((m) => m.status === s)
+    const monthApproved = monthMine
+      .filter((e) => e.status === "APPROVED")
+      .reduce((sum, e) => sum + e.amount, 0)
+
+    return ok({
+      scope: "personal",
+      kpis: {
+        totalSubmitted: mine.reduce((sum, m) => sum + m._count._all, 0),
+        pending: stat("PENDING")?._count._all ?? 0,
+        approved: stat("APPROVED")?._count._all ?? 0,
+        rejected: stat("REJECTED")?._count._all ?? 0,
+        approvedAmount: stat("APPROVED")?._sum.amount ?? 0,
+        thisMonthApproved: monthApproved,
+      },
+      recentExpenses: recent,
+    })
+  }
+
+  // ---------------- Finance / management view ----------------
+  const monthStartNow = monthStart()
+  const nextMonthStart = new Date(monthStartNow.getFullYear(), monthStartNow.getMonth() + 1, 1)
+
+  const months = lastNMonths(12)
+  const monthKeys = months.map((m) => m.start.toISOString())
+
+  const [txAll, recentTx, pendingExpenses, invoiceGroups, expenseTxMonth, incomeTxMonth, cashAll, topExpenseCats] =
+    await Promise.all([
+      db.transaction.findMany({
+        where: { date: { gte: months[0].start, lte: months[months.length - 1].end } },
+        select: { date: true, type: true, amount: true },
+      }),
+      db.transaction.findMany({
+        orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+        take: 7,
+        include: {
+          category: true,
+          client: { select: { name: true } },
+          createdBy: { select: { name: true } },
+        },
+      }),
+      db.expense.findMany({
+        where: { status: "PENDING" },
+        orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+        take: 6,
+        include: {
+          submitter: { select: { id: true, name: true, role: true } },
+          category: true,
+        },
+      }),
+      db.invoice.groupBy({
+        by: ["status"],
+        _sum: { total: true },
+        _count: { _all: true },
+      }),
+      db.transaction.aggregate({
+        where: { type: "EXPENSE", date: { gte: monthStartNow, lt: nextMonthStart } },
+        _sum: { amount: true },
+      }),
+      db.transaction.aggregate({
+        where: { type: "INCOME", date: { gte: monthStartNow, lt: nextMonthStart } },
+        _sum: { amount: true },
+      }),
+      db.transaction.groupBy({
+        by: ["type"],
+        _sum: { amount: true },
+      }),
+      db.transaction.groupBy({
+        by: ["categoryId"],
+        where: { type: "EXPENSE", date: { gte: monthStartNow, lt: nextMonthStart } },
+        _sum: { amount: true },
+        orderBy: { _sum: { amount: "desc" } },
+        take: 5,
+      }),
+    ])
+
+  // 12-month income/expense series
+  const series = months.map((m) => {
+    const inRange = txAll.filter(
+      (t) => t.date >= m.start && t.date <= m.end
+    )
+    return {
+      month: m.label,
+      key: m.start.toISOString(),
+      income: inRange.filter((t) => t.type === "INCOME").reduce((s, t) => s + t.amount, 0),
+      expense: inRange.filter((t) => t.type === "EXPENSE").reduce((s, t) => s + t.amount, 0),
+    }
+  })
+
+  const sumByType = (type: string) => cashAll.find((c) => c.type === type)?._sum.amount ?? 0
+  const lifetimeIncome = sumByType("INCOME")
+  const lifetimeExpense = sumByType("EXPENSE")
+
+  const categoryIds = topExpenseCats.map((t) => t.categoryId).filter(Boolean)
+  const categories = await db.category.findMany({ where: { id: { in: categoryIds } } })
+  const catName = (id: string | null) => categories.find((c) => c.id === id)?.name ?? "Uncategorized"
+
+  const invStat = (s: string) => invoiceGroups.find((g) => g.status === s)
+  const receivables = invStat("SENT")?._sum.total ?? 0
+
+  const pendingExpenseTotal = await db.expense.aggregate({
+    where: { status: "PENDING" },
+    _sum: { amount: true },
+  })
+  const approvedUnpaid = await db.expense.aggregate({
+    where: { status: "APPROVED" },
+    _sum: { amount: true },
+  })
+
+  const thisMonthIncome = incomeTxMonth._sum.amount ?? 0
+  const thisMonthExpense = expenseTxMonth._sum.amount ?? 0
+
+  return ok({
+    scope: "company",
+    kpis: {
+      revenue: thisMonthIncome,
+      expenses: thisMonthExpense,
+      net: thisMonthIncome - thisMonthExpense,
+      cash: lifetimeIncome - lifetimeExpense,
+      receivables,
+      pendingPayouts: approvedUnpaid._sum.amount ?? 0,
+    },
+    series,
+    monthKeys,
+    recentTransactions: recentTx,
+    pendingApprovals: pendingExpenses.map((e) => ({
+      ...e,
+      amountLabel: e.amount,
+    })),
+    pendingApprovalsTotal: pendingExpenseTotal._sum.amount ?? 0,
+    invoices: {
+      draft: invStat("DRAFT")?._count._all ?? 0,
+      sent: invStat("SENT")?._count._all ?? 0,
+      paid: invStat("PAID")?._count._all ?? 0,
+      paidAmount: invStat("PAID")?._sum.total ?? 0,
+    },
+    topExpenseCategories: topExpenseCats.map((t) => ({
+      name: catName(t.categoryId),
+      amount: t._sum.amount ?? 0,
+    })),
+  })
 }

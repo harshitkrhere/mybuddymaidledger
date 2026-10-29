@@ -1,485 +1,400 @@
-/**
- * Seed for MyBuddyMaid ERP — domestic help placement platform
- * INR, GST 18%, Silver/Gold/Diamond plans, 8 cities
- */
-import { PrismaClient } from '@prisma/client';
+// ============================================================
+// Seed — Ledger portal bootstrap.
+// Creates one user per role, categories, clients, and a year of
+// realistic finance data so the dashboard feels alive on day one.
+// Run: bun run db:seed
+// ============================================================
 
-const db = new PrismaClient();
-const money = (n: number) => Math.round(n * 100) / 100;
+import { PrismaClient } from "@prisma/client"
+import bcrypt from "bcryptjs"
 
-// deterministic pseudo-random for stable seeds
-let seedState = 42;
+const db = new PrismaClient()
+
+// Small deterministic PRNG so repeated seeds look consistent.
+let seed = 42
 function rnd() {
-  seedState = (seedState * 1103515245 + 12345) % 2147483648;
-  return seedState / 2147483648;
+  seed = (seed * 1103515245 + 12345) % 2147483648
+  return seed / 2147483648
 }
 function pick<T>(arr: T[]): T {
-  return arr[Math.floor(rnd() * arr.length)];
+  return arr[Math.floor(rnd() * arr.length)]
 }
-function pickWeighted<T extends { w: number }>(arr: T[]): T {
-  const total = arr.reduce((s, a) => s + a.w, 0);
-  let r = rnd() * total;
-  for (const a of arr) {
-    r -= a.w;
-    if (r <= 0) return a;
-  }
-  return arr[arr.length - 1];
+function between(min: number, max: number) {
+  return Math.round(min + rnd() * (max - min))
 }
 
-const PLANS = {
-  SILVER: { fee: 4999, coverageMonths: 10, maxPlacements: 3 },
-  GOLD: { fee: 5999, coverageMonths: 12, maxPlacements: 5 },
-  DIAMOND: { fee: 6999, coverageMonths: 18, maxPlacements: 10 },
-} as const;
-
-const GST_RATE = 18;
-
-const ACCOUNT_DEFS: [string, string, string, string?][] = [
-  ['1000', 'Cash on Hand', 'ASSET', 'CURRENT_ASSET'],
-  ['1010', 'Bank Account (Current)', 'ASSET', 'CURRENT_ASSET'],
-  ['1100', 'Accounts Receivable', 'ASSET', 'CURRENT_ASSET'],
-  ['1200', 'Prepaid Expenses', 'ASSET', 'CURRENT_ASSET'],
-  ['1500', 'Equipment (Laptops & Phones)', 'ASSET', 'FIXED_ASSET'],
-  ['1510', 'Accumulated Depreciation', 'ASSET', 'FIXED_ASSET'],
-  ['2000', 'Accounts Payable', 'LIABILITY', 'CURRENT_LIABILITY'],
-  ['2100', 'Salaries Payable', 'LIABILITY', 'CURRENT_LIABILITY'],
-  ['2200', 'GST Payable', 'LIABILITY', 'CURRENT_LIABILITY'],
-  ['2300', 'Advance from Customers', 'LIABILITY', 'CURRENT_LIABILITY'],
-  ['2500', 'Loan Payable', 'LIABILITY', 'LONG_TERM_LIABILITY'],
-  ['3000', 'Owner Capital', 'EQUITY', 'PAID_IN_CAPITAL'],
-  ['3100', 'Retained Earnings', 'EQUITY', 'RETAINED_EARNINGS'],
-  ['3200', 'Owner Draws', 'EQUITY', 'DRAW'],
-  ['4000', 'Silver Plan Revenue', 'REVENUE', 'OPERATING_REVENUE'],
-  ['4010', 'Gold Plan Revenue', 'REVENUE', 'OPERATING_REVENUE'],
-  ['4020', 'Diamond Plan Revenue', 'REVENUE', 'OPERATING_REVENUE'],
-  ['4900', 'Other Income', 'REVENUE', 'OTHER_REVENUE'],
-  ['5000', 'Staff Salaries', 'EXPENSE', 'PAYROLL'],
-  ['5100', 'Verification & Onboarding Costs', 'EXPENSE', 'OPERATING'],
-  ['5200', 'Technology & Subscriptions', 'EXPENSE', 'OPERATING'],
-  ['5300', 'Office Rent', 'EXPENSE', 'OPERATING'],
-  ['5400', 'Marketing & Advertising', 'EXPENSE', 'OPERATING'],
-  ['5500', 'Travel & Field Visits', 'EXPENSE', 'OPERATING'],
-  ['5600', 'Utilities', 'EXPENSE', 'OPERATING'],
-  ['5700', 'Office Supplies', 'EXPENSE', 'OPERATING'],
-  ['5800', 'Professional Fees', 'EXPENSE', 'OPERATING'],
-  ['5900', 'Bank & Payment Charges', 'EXPENSE', 'OPERATING'],
-  ['6000', 'Refunds & Concessions', 'EXPENSE', 'OPERATING'],
-  ['6100', 'Depreciation', 'EXPENSE', 'NON_OPERATING'],
-];
-
-const CITIES = [
-  { name: 'Delhi', localities: ['Hauz Khas', 'Vasant Vihar', 'Rajouri Garden', 'Mayur Vihar', 'Defence Colony', 'Karol Bagh', 'Safdarjung', 'Pitampura'], w: 30 },
-  { name: 'Gurgaon', localities: ['DLF Phase 3', 'Sohna Road', 'Golf Course Road', 'Sector 56', 'Sushant Lok'], w: 20 },
-  { name: 'Noida', localities: ['Sector 62', 'Sector 137', 'Indirapuram', 'Sector 50'], w: 15 },
-  { name: 'Mumbai', localities: ['Powai', 'Bandra West', 'Andheri West', 'Chembur', 'Malad West'], w: 15 },
-  { name: 'Pune', localities: ['Kothrud', 'Baner', 'Viman Nagar', 'Aundh'], w: 8 },
-  { name: 'Bangalore', localities: ['Whitefield', 'Indiranagar', 'HSR Layout', 'Jayanagar'], w: 8 },
-  { name: 'Mangalore', localities: ['Kadri', 'Bejai', 'Hampankatta'], w: 4 },
-];
-
-const CUST_FIRST = ['Rohit', 'Meera', 'Anjali', 'Vikram', 'Priya', 'Suresh', 'Kavita', 'Rahul', 'Sneha', 'Deepa', 'Amit', 'Sunita', 'Manish', 'Farah', 'Nisha', 'Arjun', 'Rekha', 'Sanjay', 'Pooja', 'Ashok', 'Lata', 'Nitin', 'Shalini', 'Harish', 'Divya', 'Rakesh', 'Mamta', 'Prakash', 'Swati', 'Ajay', 'Namrata', 'Ritu', 'Sandeep', 'Gauri', 'Vinod', 'Anupama', 'Rajesh', 'Beena', 'Mukesh', 'Sarita', 'Hemant', 'Vandana', 'Yogesh', 'Neelam', 'Dinesh', 'Aparna', 'Girish', 'Shobha', 'Kiran', 'Bhavana'];
-const CUST_LAST = ['Kapoor', 'Sharma', 'Malhotra', 'Nair', 'Iyer', 'Joshi', 'Verma', 'Rao', 'Chatterjee', 'Agarwal', 'Gupta', 'Khan', 'Pillai', 'Menon', 'Bansal', 'Saxena', 'Bhatt', 'Trivedi', 'Shetty', 'Reddy', 'Mishra', 'Tiwari', 'Bajaj', 'Chopra', 'Goel', 'Desai', 'Kulkarni', 'Pai', 'Shukla', 'Dubey', 'Ghosh', 'Banerjee', 'Mehta', 'Shah', 'Jain', 'Sethi'];
-
-const HELPER_FEMALE = ['Sunita', 'Geeta', 'Sita', 'Radha', 'Kamla', 'Parvati', 'Munni', 'Chhaya', 'Babita', 'Rekha', 'Shanti', 'Vimla', 'Laxmi', 'Phoolwati', 'Asha', 'Usha', 'Gudiya', 'Rani', 'Saroj', 'Meena', 'Kaushalya', 'Jyoti', 'Nirmala', 'Bholi', 'Anita', 'Poonam', 'Sushma', 'Kiran', 'Nirmala Devi', 'Chanda'];
-const HELPER_MALE = ['Rameshwar', 'Ramkishan', 'Bhola', 'Dinesh', 'Mahesh', 'Shyam', 'Gopal', 'Rajendra', 'Munna', 'Kalpanath'];
-const HELPER_LAST = ['Devi', 'Kumari', 'Bai', 'Yadav', 'Sharma', 'Singh', 'Paswan', 'Sah', 'Mandal', 'Pal', 'Ram', 'Prasad', 'Thakur', 'Biswas', 'Das', 'Kumhar', 'Soren', 'Tanti'];
-
-const SERVICE_WEIGHTS = [
-  { type: 'FULL_TIME_MAID', w: 25 },
-  { type: 'PART_TIME_MAID', w: 25 },
-  { type: 'COOK', w: 20 },
-  { type: 'BABYSITTER', w: 12 },
-  { type: 'ELDER_CARE', w: 10 },
-  { type: 'DOMESTIC_HELP', w: 8 },
-];
-
-const PLAN_WEIGHTS = [
-  { type: 'SILVER', w: 35 },
-  { type: 'GOLD', w: 45 },
-  { type: 'DIAMOND', w: 20 },
-];
-
-const SERVICE_RATES: Record<string, number> = {
-  FULL_TIME_MAID: 16000,
-  PART_TIME_MAID: 4500,
-  COOK: 10000,
-  BABYSITTER: 14000,
-  ELDER_CARE: 15000,
-  DOMESTIC_HELP: 5000,
-};
-
-const accountByCode: Record<string, string> = {};
-
-async function nextJE() {
-  const count = await db.journalEntry.count();
-  return `JE-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
-}
-
-async function postEntry(
-  date: Date,
-  memo: string,
-  lines: { accountId: string; debit?: number; credit?: number; memo?: string }[],
-  reference?: string,
-  source = 'MANUAL'
-) {
-  const d = money(lines.reduce((s, l) => s + (l.debit || 0), 0));
-  const c = money(lines.reduce((s, l) => s + (l.credit || 0), 0));
-  if (Math.abs(d - c) > 0.005) throw new Error(`Unbalanced: ${memo} D=${d} C=${c}`);
-  await db.journalEntry.create({
-    data: {
-      entryNumber: await nextJE(),
-      date,
-      memo,
-      reference,
-      source,
-      lines: { create: lines },
-    },
-  });
+const PASSWORDS: Record<string, string> = {
+  red: "Red@2026",
+  admin: "Admin@2026",
+  manager: "Manager@2026",
+  employee: "Employee@2026",
 }
 
 async function main() {
-  console.log('Seeding MyBuddyMaid ERP...');
+  console.log("Clearing existing data…")
+  await db.session.deleteMany()
+  await db.auditLog.deleteMany()
+  await db.invoiceItem.deleteMany()
+  await db.invoice.deleteMany()
+  await db.expense.deleteMany()
+  await db.transaction.deleteMany()
+  await db.category.deleteMany()
+  await db.client.deleteMany()
+  await db.companySettings.deleteMany()
+  await db.user.deleteMany()
 
-  await db.journalLine.deleteMany();
-  await db.journalEntry.deleteMany();
-  await db.placement.deleteMany();
-  await db.planSale.deleteMany();
-  await db.customer.deleteMany();
-  await db.helper.deleteMany();
-  await db.expense.deleteMany();
-  await db.account.deleteMany();
-  await db.setting.deleteMany();
+  console.log("Creating users (one per role)…")
+  const hash = async (p: string) => bcrypt.hash(p, 10)
 
-  // 1. accounts
-  for (const [code, name, type, subtype] of ACCOUNT_DEFS) {
-    const a = await db.account.create({ data: { code, name, type, subtype } });
-    accountByCode[code] = a.id;
-  }
-  console.log(`Created ${ACCOUNT_DEFS.length} accounts`);
+  const red = await db.user.create({
+    data: {
+      name: "Aarav Mehta",
+      email: "red@mybuddymaid.com",
+      passwordHash: await hash(PASSWORDS.red),
+      role: "RED",
+      title: "Founder & Owner",
+    },
+  })
+  const admin = await db.user.create({
+    data: {
+      name: "Sneha Iyer",
+      email: "admin@mybuddymaid.com",
+      passwordHash: await hash(PASSWORDS.admin),
+      role: "ADMIN",
+      title: "Operations Admin",
+    },
+  })
+  const manager = await db.user.create({
+    data: {
+      name: "Rohit Sharma",
+      email: "manager@mybuddymaid.com",
+      passwordHash: await hash(PASSWORDS.manager),
+      role: "MANAGER",
+      title: "Finance Manager",
+    },
+  })
+  const employee = await db.user.create({
+    data: {
+      name: "Priya Nair",
+      email: "employee@mybuddymaid.com",
+      passwordHash: await hash(PASSWORDS.employee),
+      role: "EMPLOYEE",
+      title: "Field Coordinator",
+    },
+  })
+  const employee2 = await db.user.create({
+    data: {
+      name: "Kabir Singh",
+      email: "kabir@mybuddymaid.com",
+      passwordHash: await hash(PASSWORDS.employee),
+      role: "EMPLOYEE",
+      title: "Recruitment Associate",
+    },
+  })
 
-  // 2. helpers (~34)
-  const helpers: { id: string; serviceType: string; city: string; status: string; name: string }[] = [];
-  const usedHelperNames = new Set<string>();
-  for (let i = 0; i < 34; i++) {
-    const city = pickWeighted(CITIES.map((c) => ({ name: c.name, localities: c.localities, w: c.w })));
-    const svc = pickWeighted(SERVICE_WEIGHTS).type;
-    const female = ['BABYSITTER', 'ELDER_CARE', 'FULL_TIME_MAID', 'PART_TIME_MAID'].includes(svc) || rnd() > 0.7;
-    let name = '';
-    let guard = 0;
-    do {
-      name = `${pick(female ? HELPER_FEMALE : HELPER_MALE)} ${pick(HELPER_LAST)}`;
-      guard++;
-    } while (usedHelperNames.has(name) && guard < 20);
-    usedHelperNames.add(name);
+  console.log("Creating company settings…")
+  await db.companySettings.create({
+    data: {
+      id: "singleton",
+      companyName: "MyBuddyMaid Services",
+      currency: "INR",
+      taxRate: 18,
+      email: "billing@mybuddymaid.com",
+      phone: "+91 98200 12345",
+      address: "4th Floor, Trade Centre, Bandra Kurla Complex, Mumbai 400051",
+    },
+  })
 
-    const statusRoll = rnd();
-    const status = statusRoll < 0.42 ? 'VERIFIED' : statusRoll < 0.75 ? 'PLACED' : statusRoll < 0.88 ? 'PENDING' : 'INACTIVE';
-    const fullyVerified = status === 'VERIFIED' || status === 'PLACED';
-
-    const h = await db.helper.create({
-      data: {
-        name,
-        phone: `+91 ${String(70000 + Math.floor(rnd() * 29999))} ${String(10000 + Math.floor(rnd() * 89999))}`,
-        gender: female ? 'F' : 'M',
-        city: city.name,
-        locality: pick(city.localities),
-        serviceType: svc,
-        expectedMonthlyRate: SERVICE_RATES[svc] + Math.floor(rnd() * 4) * 500,
-        aadhaarVerified: fullyVerified || (status === 'PENDING' && rnd() > 0.4),
-        policeVerified: fullyVerified,
-        referenceChecked: fullyVerified || (status === 'PENDING' && rnd() > 0.6),
-        status,
-        createdAt: new Date(Date.now() - Math.floor(rnd() * 180) * 86400000),
-      },
-    });
-    helpers.push({ id: h.id, serviceType: svc, city: city.name, status, name });
-  }
-  console.log(`Created ${helpers.length} helpers`);
-
-  // 3. customers + plan sales over last 6 months
-  const now = new Date();
-  const usedCustNames = new Set<string>();
-  let saleSeq = 0;
-  const customersWithPlans: { id: string; name: string; maxPlacements: number; serviceType: string }[] = [];
-
-  for (let i = 0; i < 48; i++) {
-    const city = pickWeighted(CITIES.map((c) => ({ name: c.name, localities: c.localities, w: c.w })));
-    let name = '';
-    let guard = 0;
-    do {
-      name = `${pick(CUST_FIRST)} ${pick(CUST_LAST)}`;
-      guard++;
-    } while (usedCustNames.has(name) && guard < 30);
-    usedCustNames.add(name);
-
-    // purchase month spread over the last 6 months
-    const monthsAgo = Math.floor(rnd() * 6);
-    const purchaseDate = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 1 + Math.floor(rnd() * 27));
-    const planType = pickWeighted(PLAN_WEIGHTS).type;
-    const plan = PLANS[planType as keyof typeof PLANS];
-    const expiry = new Date(purchaseDate);
-    expiry.setMonth(expiry.getMonth() + plan.coverageMonths);
-
-    const cust = await db.customer.create({
-      data: {
-        name,
-        phone: `+91 ${String(90000 + Math.floor(rnd() * 9999))} ${String(10000 + Math.floor(rnd() * 89999))}`,
-        email: rnd() > 0.5 ? `${name.split(' ')[0].toLowerCase()}${Math.floor(rnd() * 99)}@${pick(['gmail.com', 'outlook.com', 'yahoo.com'])}` : null,
-        city: city.name,
-        locality: pick(city.localities),
-        planType,
-        planFee: plan.fee,
-        planPurchaseDate: purchaseDate,
-        planExpiryDate: expiry,
-        maxPlacements: plan.maxPlacements,
-        status: 'ACTIVE',
-        createdAt: purchaseDate,
-      },
-    });
-
-    // plan sale + journal entry
-    const fee = plan.fee;
-    const gst = money(fee * GST_RATE / 100);
-    const total = money(fee + gst);
-    const paymentMode = pick(['UPI', 'UPI', 'UPI', 'BANK', 'BANK', 'CARD', 'CASH']);
-    saleSeq++;
-    await db.planSale.create({
-      data: {
-        customerId: cust.id,
-        planType,
-        feeAmount: fee,
-        gstRate: GST_RATE,
-        gstAmount: gst,
-        totalAmount: total,
-        paymentMode,
-        saleDate: purchaseDate,
-      },
-    });
-    const payAccount = paymentMode === 'CASH' ? accountByCode['1000'] : accountByCode['1010'];
-    const revenueCode = planType === 'SILVER' ? '4000' : planType === 'GOLD' ? '4010' : '4020';
-    await postEntry(
-      purchaseDate,
-      `Plan sale — ${planType} (${name}, ${city.name})`,
-      [
-        { accountId: payAccount, debit: total, memo: `${paymentMode} received` },
-        { accountId: accountByCode[revenueCode], credit: fee, memo: `${planType} plan fee` },
-        { accountId: accountByCode['2200'], credit: gst, memo: 'GST output @18%' },
-      ],
-      `SALE-${saleSeq}`,
-      'PLAN_SALE'
-    );
-
-    customersWithPlans.push({
-      id: cust.id,
-      name,
-      maxPlacements: plan.maxPlacements,
-      serviceType: pickWeighted(SERVICE_WEIGHTS).type,
-    });
-  }
-  console.log(`Created 48 customers, ${saleSeq} plan sales`);
-
-  // 4. placements for ~20 customers
-  let placementsCreated = 0;
-  const placedHelpers = new Set<string>();
-  for (const cust of customersWithPlans.slice(0, 22)) {
-    const candidate = helpers.find(
-      (h) => !placedHelpers.has(h.id) && h.status !== 'INACTIVE' && h.serviceType === cust.serviceType && (h.status === 'VERIFIED' || h.status === 'PLACED')
-    );
-    if (!candidate) continue;
-    placedHelpers.add(candidate.id);
-
-    const startDate = new Date(now.getFullYear(), now.getMonth() - Math.floor(rnd() * 4), 1 + Math.floor(rnd() * 25));
-    const rate = SERVICE_RATES[cust.serviceType] + Math.floor(rnd() * 4) * 500;
-
-    const roll = rnd();
-    if (roll < 0.6) {
-      // active placement
-      await db.placement.create({
-        data: {
-          customerId: cust.id,
-          helperId: candidate.id,
-          serviceType: cust.serviceType,
-          startDate,
-          monthlyRate: rate,
-          status: 'ACTIVE',
-        },
-      });
-      await db.customer.update({ where: { id: cust.id }, data: { placementsUsed: { increment: 1 } } });
-      await db.helper.update({ where: { id: candidate.id }, data: { status: 'PLACED' } });
-      placementsCreated++;
-    } else if (roll < 0.8) {
-      // ended placement (helper left)
-      const endDate = new Date(startDate.getTime() + Math.floor(rnd() * 60 + 20) * 86400000);
-      await db.placement.create({
-        data: {
-          customerId: cust.id,
-          helperId: candidate.id,
-          serviceType: cust.serviceType,
-          startDate,
-          endDate,
-          monthlyRate: rate,
-          status: 'ENDED',
-          notes: 'Helper moved back to hometown',
-        },
-      });
-      await db.customer.update({ where: { id: cust.id }, data: { placementsUsed: { increment: 1 } } });
-      placementsCreated++;
-    } else {
-      // replaced: original ended + replacement active
-      const endDate = new Date(startDate.getTime() + Math.floor(rnd() * 40 + 15) * 86400000);
-      await db.placement.create({
-        data: {
-          customerId: cust.id,
-          helperId: candidate.id,
-          serviceType: cust.serviceType,
-          startDate,
-          endDate,
-          monthlyRate: rate,
-          status: 'REPLACED',
-          notes: 'Replaced under plan coverage',
-        },
-      });
-      await db.customer.update({ where: { id: cust.id }, data: { placementsUsed: { increment: 1 } } });
-      const replacement = helpers.find(
-        (h) => !placedHelpers.has(h.id) && (h.status === 'VERIFIED' || h.status === 'PLACED') && h.serviceType === cust.serviceType
-      );
-      if (replacement) {
-        placedHelpers.add(replacement.id);
-        const rStart = new Date(endDate.getTime() + 2 * 86400000);
-        await db.placement.create({
-          data: {
-            customerId: cust.id,
-            helperId: replacement.id,
-            serviceType: cust.serviceType,
-            startDate: rStart,
-            monthlyRate: rate,
-            status: 'ACTIVE',
-            isReplacement: true,
-          },
-        });
-        await db.customer.update({ where: { id: cust.id }, data: { placementsUsed: { increment: 1 } } });
-        await db.helper.update({ where: { id: replacement.id }, data: { status: 'PLACED' } });
-        placementsCreated++;
-      }
-    }
-  }
-  console.log(`Created ${placementsCreated} placements`);
-
-  // 5. monthly expenses (6 months, lean operation)
-  const expenseTemplate: { code: string; amount: number; desc: string; category: string; vendor: string; day: number; mode: string }[] = [
-    { code: '5000', amount: 28000, desc: 'Staff salaries (coordinator + verification exec)', category: 'Payroll', vendor: 'Payroll', day: 28, mode: 'BANK' },
-    { code: '5300', amount: 8000, desc: 'Co-working space rent', category: 'Rent', vendor: 'Innov8 Coworking', day: 3, mode: 'BANK' },
-    { code: '5400', amount: 6500, desc: 'Google Ads + local flyers', category: 'Marketing', vendor: 'Google Ads', day: 10, mode: 'CARD' },
-    { code: '5100', amount: 2400, desc: 'Police verification & Aadhaar checks (~12 helpers)', category: 'Verification', vendor: 'Verification vendors', day: 15, mode: 'UPI' },
-    { code: '5200', amount: 2100, desc: 'App hosting, WhatsApp Business API, CRM', category: 'Technology', vendor: 'AWS / Meta', day: 5, mode: 'CARD' },
-    { code: '5500', amount: 1600, desc: 'Field visits — local travel', category: 'Travel', vendor: 'Metro / Ola', day: 20, mode: 'UPI' },
-    { code: '5600', amount: 900, desc: 'Electricity, internet & phone', category: 'Utilities', vendor: 'Airtel / BSES', day: 8, mode: 'UPI' },
-    { code: '5900', amount: 450, desc: 'Payment gateway & bank charges', category: 'Banking', vendor: 'Razorpay / HDFC', day: 25, mode: 'BANK' },
-  ];
-
-  for (let m = 5; m >= 0; m--) {
-    const monthStart = new Date(now.getFullYear(), now.getMonth() - m, 1);
-    // opening entry only at month 5 start
-    if (m === 5) {
-      await postEntry(
-        monthStart,
-        'Opening balances',
-        [
-          { accountId: accountByCode['1010'], debit: 350000, memo: 'Bank opening' },
-          { accountId: accountByCode['1000'], debit: 8000, memo: 'Cash opening' },
-          { accountId: accountByCode['1500'], debit: 90000, memo: 'Laptops & phones' },
-          { accountId: accountByCode['2500'], credit: 100000, memo: 'Business loan' },
-          { accountId: accountByCode['3000'], credit: 348000, memo: 'Owner capital' },
-        ],
-        undefined,
-        'OPENING'
-      );
-    }
-    for (const e of expenseTemplate) {
-      const expDate = new Date(monthStart.getFullYear(), monthStart.getMonth(), e.day);
-      const variance = 1 + (rnd() - 0.5) * 0.2;
-      const amount = money(e.amount * variance);
-      await db.expense.create({
-        data: {
-          date: expDate,
-          description: e.desc,
-          amount,
-          category: e.category,
-          paymentMode: e.mode,
-          vendor: e.vendor,
-        },
-      });
-      const payAccount = e.mode === 'CASH' ? accountByCode['1000'] : accountByCode['1010'];
-      await postEntry(
-        expDate,
-        `Expense — ${e.desc}`,
-        [
-          { accountId: accountByCode[e.code], debit: amount, memo: e.category },
-          { accountId: payAccount, credit: amount, memo: `Paid via ${e.mode}` },
-        ],
-        undefined,
-        'EXPENSE'
-      );
-    }
-  }
-
-  // 6. one refund example (2 months ago, Silver)
-  const refundCust = customersWithPlans[30];
-  if (refundCust) {
-    const refundDate = new Date(now.getFullYear(), now.getMonth() - 2, 18);
-    const refundable = money(PLANS.SILVER.fee - 2000);
-    await db.customer.update({
-      where: { id: refundCust.id },
-      data: { status: 'REFUNDED', notes: 'Refunded — could not provide 3 profiles within 45 days' },
-    });
-    const sale = await db.planSale.findFirst({ where: { customerId: refundCust.id }, orderBy: { saleDate: 'desc' } });
-    if (sale) {
-      await db.planSale.update({
-        where: { id: sale.id },
-        data: { isRefunded: true, refundAmount: refundable },
-      });
-    }
-    await postEntry(
-      refundDate,
-      `Refund — Silver plan (${refundCust.name})`,
-      [
-        { accountId: accountByCode['6000'], debit: refundable, memo: 'Refund of refundable portion' },
-        { accountId: accountByCode['1010'], credit: refundable, memo: 'Bank transfer to customer' },
-      ],
-      'REFUND-1',
-      'REFUND'
-    );
-  }
-
-  // 7. owner draw last month
-  await postEntry(
-    new Date(now.getFullYear(), now.getMonth() - 1, 25),
-    'Owner draw',
+  console.log("Creating categories…")
+  const incomeCats = await Promise.all(
+    ["Plan Sales", "Placement Fees", "Renewals", "Consulting"].map((name) =>
+      db.category.create({ data: { name, type: "INCOME" } })
+    )
+  )
+  const expenseCats = await Promise.all(
     [
-      { accountId: accountByCode['3200'], debit: 15000 },
-      { accountId: accountByCode['1010'], credit: 15000 },
-    ]
-  );
+      "Salaries & Wages",
+      "Helper Recruitment",
+      "Transport & Logistics",
+      "Marketing",
+      "Office Rent",
+      "Utilities",
+      "Software & Tools",
+      "Training & Verification",
+    ].map((name) => db.category.create({ data: { name, type: "EXPENSE" } }))
+  )
 
-  // 8. settings
-  await db.setting.create({ data: { key: 'companyName', value: 'MyBuddyMaid' } });
-  await db.setting.create({ data: { key: 'currency', value: 'INR' } });
+  console.log("Creating clients & vendors…")
+  const clientNames = [
+    ["Sharma Family", "suresh.sharma@example.com", "Bandra West, Mumbai"],
+    ["Kapoor Household", "ritika.kapoor@example.com", "Juhu, Mumbai"],
+    ["Mehta Residence", "jay.mehta@example.com", "Powai, Mumbai"],
+    ["Reddy Villa", "lakshmi.reddy@example.com", "Banjara Hills, Hyderabad"],
+    ["Iyer Home", "ram.iyer@example.com", "Adyar, Chennai"],
+    ["Gupta Family", "neha.gupta@example.com", "Indiranagar, Bengaluru"],
+  ]
+  const clients = await Promise.all(
+    clientNames.map(([name, email, address]) =>
+      db.client.create({ data: { name, email, address, phone: `+91 9${between(100000000, 999999999)}`, type: "CLIENT" } })
+    )
+  )
+  const vendors = await Promise.all(
+    [
+      ["CleanPro Supplies", "accounts@cleanpro.example.com", "VENDOR"],
+      ["SecureCheck Verification", "billing@securecheck.example.com", "VENDOR"],
+      ["QuickMove Logistics", "ops@quickmove.example.com", "VENDOR"],
+    ].map(([name, email, type]) =>
+      db.client.create({ data: { name, email, type, address: "Andheri East, Mumbai" } })
+    )
+  )
+
+  // ------------------------------------------------------------
+  // Transactions — 14 months of ledger history
+  // ------------------------------------------------------------
+  console.log("Creating transactions…")
+  const today = new Date()
+  const txCreators = [manager.id, admin.id, red.id]
+  let txCount = 0
+
+  for (let m = 13; m >= 0; m--) {
+    const monthDate = new Date(today.getFullYear(), today.getMonth() - m, 1)
+    const growth = 1 + (13 - m) * 0.045 // gentle upward trend
+
+    // Income: 8–12 entries per month (healthy, growing top line)
+    const incomeEntries = between(8, 12)
+    for (let i = 0; i < incomeEntries; i++) {
+      const day = between(1, 28)
+      const date = new Date(monthDate.getFullYear(), monthDate.getMonth(), day)
+      if (date > today) continue
+      const cat = pick(incomeCats)
+      const base = cat.name === "Plan Sales" ? between(18000, 48000) : cat.name === "Placement Fees" ? between(8000, 22000) : between(4000, 15000)
+      txCount++
+      await db.transaction.create({
+        data: {
+          date,
+          type: "INCOME",
+          amount: Math.round(base * growth),
+          description:
+            cat.name === "Plan Sales"
+              ? `${pick(["Silver", "Gold", "Diamond"])} plan sale — ${pick(clients).name}`
+              : cat.name === "Placement Fees"
+                ? `Placement fee — ${pick(["maid", "cook", "babysitter", "elder care"])} · ${pick(clients).name}`
+                : cat.name === "Renewals"
+                  ? `Plan renewal — ${pick(clients).name}`
+                  : `Consulting — household staffing advisory`,
+          categoryId: cat.id,
+          clientId: rnd() > 0.25 ? pick(clients).id : null,
+          paymentMethod: pick(["UPI", "BANK", "CARD", "CASH"]),
+          reference: `RC-${1000 + txCount}`,
+          createdById: pick(txCreators),
+        },
+      })
+    }
+
+    // Expenses: fixed monthly costs (rent + salaries) plus 3–5 variable entries
+    const fixed: { cat: number; amount: number; desc: string }[] = [
+      { cat: 4, amount: 45000, desc: `Office rent — ${monthDate.toLocaleString("en-US", { month: "long" })}` },
+      { cat: 0, amount: between(38000, 52000), desc: `Staff salaries — ${monthDate.toLocaleString("en-US", { month: "long" })}` },
+    ]
+    const variableEntries = between(3, 5)
+    for (let i = 0; i < fixed.length + variableEntries; i++) {
+      const day = between(1, 28)
+      const date = new Date(monthDate.getFullYear(), monthDate.getMonth(), day)
+      if (date > today) continue
+      const isFixed = i < fixed.length
+      const cat = isFixed ? expenseCats[fixed[i].cat] : pick(expenseCats.filter((_, ci) => ci !== 0 && ci !== 4))
+      const base = isFixed
+        ? fixed[i].amount
+        : cat.name === "Helper Recruitment"
+          ? between(4000, 14000)
+          : cat.name === "Marketing"
+            ? between(5000, 18000)
+            : cat.name === "Transport & Logistics"
+              ? between(1500, 7000)
+              : cat.name === "Software & Tools"
+                ? between(1200, 6000)
+                : cat.name === "Training & Verification"
+                  ? between(2000, 9000)
+                  : between(1500, 8000)
+      txCount++
+      await db.transaction.create({
+        data: {
+          date,
+          type: "EXPENSE",
+          amount: Math.round((isFixed ? base : base * growth) / 10) * 10,
+          description: isFixed
+            ? fixed[i].desc
+            : cat.name === "Helper Recruitment"
+              ? `Recruitment drive — ${pick(["Nashik", "Solapur", "Nagpur", "Kolhapur"])}`
+              : cat.name === "Marketing"
+                ? pick(["Google Ads — local", "Instagram campaign", "Print flyers — society noticeboards", "Radio spot — local FM"])
+                : cat.name === "Transport & Logistics"
+                  ? pick(["Helper travel reimbursement", "Fuel — client visits", "Cab — airport pickup for helper"])
+                  : cat.name === "Software & Tools"
+                    ? pick(["CRM subscription", "Accounting software", "Phone + broadband bill"])
+                    : cat.name === "Training & Verification"
+                      ? pick(["Police verification batch", "Skill training workshop", "Background checks"])
+                      : pick(["Electricity bill", "Water bill", "Office supplies"]),
+          categoryId: cat.id,
+          clientId: rnd() > 0.6 ? pick(vendors).id : null,
+          paymentMethod: pick(["BANK", "UPI", "CASH"]),
+          reference: `RC-${2000 + txCount}`,
+          createdById: pick(txCreators),
+        },
+      })
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Invoices — mixed statuses
+  // ------------------------------------------------------------
+  console.log("Creating invoices…")
+  let invSeq = 0
+  async function makeInvoice(clientIdx: number, monthsAgo: number, status: string, lines: { d: string; q: number; p: number }[]) {
+    invSeq++
+    const year = new Date(today.getFullYear(), today.getMonth() - monthsAgo, 1).getFullYear()
+    const issue = new Date(today.getFullYear(), today.getMonth() - monthsAgo, between(2, 20))
+    if (issue > today) issue.setDate(today.getDate() - 5)
+    const due = new Date(issue)
+    due.setDate(due.getDate() + 15)
+    const taxRate = 18
+    const items = lines.map((l) => ({ description: l.d, quantity: l.q, unitPrice: l.p, amount: l.q * l.p }))
+    const subtotal = items.reduce((s, i) => s + i.amount, 0)
+    const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100
+    const total = subtotal + taxAmount
+    await db.invoice.create({
+      data: {
+        number: `INV-${year}-${String(invSeq).padStart(4, "0")}`,
+        clientId: clients[clientIdx].id,
+        issueDate: issue,
+        dueDate: due,
+        status,
+        subtotal,
+        taxRate,
+        taxAmount,
+        total,
+        notes: status === "SENT" ? "Payment due within 15 days. UPI: mybuddymaid@okicici" : null,
+        createdById: manager.id,
+        items: { create: items },
+      },
+    })
+  }
+
+  await makeInvoice(0, 4, "PAID", [{ d: "Gold plan · 12 months", q: 1, p: 36000 }, { d: "Replacement placement", q: 1, p: 6000 }])
+  await makeInvoice(1, 3, "PAID", [{ d: "Silver plan · 12 months", q: 1, p: 18000 }])
+  await makeInvoice(2, 3, "PAID", [{ d: "Diamond plan · 12 months", q: 1, p: 54000 }, { d: "Dedicated coordinator", q: 3, p: 2500 }])
+  await makeInvoice(3, 2, "PAID", [{ d: "Gold plan · 12 months", q: 1, p: 36000 }])
+  await makeInvoice(0, 1, "SENT", [{ d: "Renewal · Gold plan", q: 1, p: 36000 }])
+  await makeInvoice(4, 1, "SENT", [{ d: "Placement fee — full-time cook", q: 1, p: 14000 }])
+  await makeInvoice(5, 0, "SENT", [{ d: "Diamond plan · 12 months", q: 1, p: 54000 }])
+  await makeInvoice(1, 0, "OVERDUE_SENT" as string, [{ d: "Replacement placement ×2", q: 2, p: 6000 }])
+  await makeInvoice(2, 0, "DRAFT", [{ d: "Consulting — staffing audit", q: 1, p: 20000 }])
+  await makeInvoice(3, 0, "DRAFT", [{ d: "Silver plan renewal", q: 1, p: 18000 }])
+
+  // The OVERDUE_SENT placeholder: normalize to SENT with an old due date.
+  await db.invoice.updateMany({ where: { status: "OVERDUE_SENT" }, data: { status: "SENT" } })
+  const overdue = await db.invoice.findFirst({ where: { number: { endsWith: "0008" } } })
+  if (overdue) {
+    await db.invoice.update({
+      where: { id: overdue.id },
+      data: { dueDate: new Date(today.getTime() - 21 * 86400000) },
+    })
+  }
+
+  // ------------------------------------------------------------
+  // Expenses — submissions across the team
+  // ------------------------------------------------------------
+  console.log("Creating expenses…")
+  const expenseSpecs: { user: string; daysAgo: number; amount: number; cat: number; desc: string; status: string; receipt?: string; note?: string }[] = [
+    { user: employee.id, daysAgo: 2, amount: 1450, cat: 2, desc: "Cab — helper airport pickup", status: "PENDING", receipt: "RCPT-1041" },
+    { user: employee.id, daysAgo: 4, amount: 3200, cat: 3, desc: "Flyers — society noticeboards, Powai", status: "PENDING", receipt: "RCPT-1038" },
+    { user: employee2.id, daysAgo: 3, amount: 5600, cat: 7, desc: "Police verification — 4 helpers, Nashik batch", status: "PENDING", receipt: "RCPT-1044" },
+    { user: employee2.id, daysAgo: 1, amount: 890, cat: 2, desc: "Fuel — client visits, Bandra to Andheri", status: "PENDING" },
+    { user: manager.id, daysAgo: 6, amount: 4200, cat: 6, desc: "Accounting software — annual renewal", status: "PENDING", receipt: "RCPT-1029" },
+    { user: employee.id, daysAgo: 12, amount: 2100, cat: 2, desc: "Cab — two client visits, Juhu", status: "APPROVED", note: "Approved within travel budget." },
+    { user: employee.id, daysAgo: 20, amount: 750, cat: 4, desc: "Team chai + snacks — Friday wrap-up", status: "APPROVED", note: "Approved. Keep these modest, please." },
+    { user: employee2.id, daysAgo: 15, amount: 3400, cat: 7, desc: "Training workshop — safety protocols", status: "APPROVED", note: "Good use of the training budget." },
+    { user: employee2.id, daysAgo: 25, amount: 1800, cat: 3, desc: "Poster print — recruitment drive", status: "REJECTED", note: "Duplicate of the marketing batch — declined." },
+    { user: manager.id, daysAgo: 9, amount: 5400, cat: 5, desc: "Office utility deposit", status: "APPROVED", note: "Approved — one-time." },
+    { user: employee.id, daysAgo: 33, amount: 1200, cat: 6, desc: "Broadband bill — field laptop", status: "APPROVED" },
+    { user: employee2.id, daysAgo: 41, amount: 2600, cat: 2, desc: "Helper transport — Solapur to Mumbai", status: "APPROVED", note: "Approved. Attach boarding passes next time." },
+  ]
+
+  for (const e of expenseSpecs) {
+    const date = new Date(today.getTime() - e.daysAgo * 86400000)
+    await db.expense.create({
+      data: {
+        submittedById: e.user,
+        date,
+        amount: e.amount,
+        categoryId: expenseCats[e.cat].id,
+        description: e.desc,
+        receiptRef: e.receipt ?? null,
+        status: e.status,
+        ...(e.status !== "PENDING"
+          ? {
+              reviewedById: manager.id,
+              reviewNote: e.note ?? null,
+              reviewedAt: new Date(date.getTime() + 2 * 86400000),
+            }
+          : {}),
+      },
+    })
+  }
+
+  // ------------------------------------------------------------
+  // Audit trail bootstrap
+  // ------------------------------------------------------------
+  console.log("Writing audit entries…")
+  await db.auditLog.create({
+    data: {
+      actorId: red.id,
+      action: "SYSTEM_SEEDED",
+      targetType: "SETTINGS",
+      targetLabel: "Ledger",
+      detail: JSON.stringify({ note: "Portal initialized with demo data", users: 5 }),
+    },
+  })
+  await db.auditLog.create({
+    data: {
+      actorId: red.id,
+      action: "USER_CREATED",
+      targetType: "USER",
+      targetId: admin.id,
+      targetLabel: admin.email,
+      detail: JSON.stringify({ role: "ADMIN", name: admin.name }),
+    },
+  })
+  await db.auditLog.create({
+    data: {
+      actorId: red.id,
+      action: "USER_CREATED",
+      targetType: "USER",
+      targetId: manager.id,
+      targetLabel: manager.email,
+      detail: JSON.stringify({ role: "MANAGER", name: manager.name }),
+    },
+  })
 
   const counts = {
-    accounts: await db.account.count(),
-    helpers: await db.helper.count(),
-    customers: await db.customer.count(),
-    planSales: await db.planSale.count(),
-    placements: await db.placement.count(),
+    users: await db.user.count(),
+    transactions: await db.transaction.count(),
+    invoices: await db.invoice.count(),
     expenses: await db.expense.count(),
-    journalEntries: await db.journalEntry.count(),
-  };
-  console.log('Seed complete:', counts);
+    clients: await db.client.count(),
+    categories: await db.category.count(),
+  }
+  console.log("Seed complete:", counts)
+  console.log("\nDemo sign-ins:")
+  console.log("  Red      red@mybuddymaid.com      / " + PASSWORDS.red)
+  console.log("  Admin    admin@mybuddymaid.com    / " + PASSWORDS.admin)
+  console.log("  Manager  manager@mybuddymaid.com  / " + PASSWORDS.manager)
+  console.log("  Employee employee@mybuddymaid.com / " + PASSWORDS.employee)
 }
 
 main()
   .catch((e) => {
-    console.error(e);
-    process.exit(1);
+    console.error(e)
+    process.exit(1)
   })
-  .finally(() => db.$disconnect());
+  .finally(() => db.$disconnect())

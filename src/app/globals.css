@@ -179,6 +179,10 @@
   -webkit-backdrop-filter: blur(24px) saturate(1.8);
 }
 
+.dark .glass {
+  background: rgba(28, 28, 30, 0.72);
+}
+
 /* Soft layered elevation for cards */
 .card-shadow {
   box-shadow:

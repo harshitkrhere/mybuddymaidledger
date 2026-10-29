@@ -5,198 +5,192 @@ generator client {
 datasource db {
   // "sqlite" for local dev | "postgresql" for production (Neon/Supabase/Railway)
   // Flip with: npm run db:use-postgres  /  npm run db:use-sqlite
-  // (Prisma does not allow env() for provider, so we swap the literal.)
   provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 // =============================
-// Chart of Accounts
+// Users & Access Control
+// Hierarchy: RED > ADMIN > MANAGER > EMPLOYEE
 // =============================
 
-model Account {
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("EMPLOYEE") // RED | ADMIN | MANAGER | EMPLOYEE
+  status       String   @default("ACTIVE") // ACTIVE | INACTIVE
+  title        String? // job title, e.g. "Finance Manager"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions            Session[]
+  submittedExpenses   Expense[]              @relation("ExpenseSubmitter")
+  reviewedExpenses    Expense[]              @relation("ExpenseReviewer")
+  createdTransactions Transaction[]          @relation("TransactionCreator")
+  createdInvoices     Invoice[]              @relation("InvoiceCreator")
+  auditEntries        AuditLog[]             @relation("AuditActor")
+
+  @@index([role])
+  @@index([status])
+}
+
+model Session {
+  id        String   @id // opaque random token stored in httpOnly cookie
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// =============================
+// Finance core
+// =============================
+
+model Category {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  type     String // INCOME | EXPENSE
+  isActive Boolean @default(true)
+
+  transactions Transaction[]
+  expenses     Expense[]
+}
+
+model Client {
   id        String   @id @default(cuid())
-  code      String   @unique
   name      String
-  type      String   // ASSET | LIABILITY | EQUITY | REVENUE | EXPENSE
-  subtype   String?
+  type      String   @default("CLIENT") // CLIENT | VENDOR
+  email     String?
+  phone     String?
+  address   String?
+  notes     String?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  journalLines JournalLine[]
+  invoices     Invoice[]
+  transactions Transaction[]
+
+  @@index([type])
+  @@index([name])
 }
 
-// =============================
-// Double-Entry Journal
-// =============================
-
-model JournalEntry {
-  id          String   @id @default(cuid())
-  entryNumber String   @unique
-  date        DateTime
-  memo        String
-  reference   String?
-  source      String   @default("MANUAL") // MANUAL | PLAN_SALE | EXPENSE | REFUND | OPENING
-  isPosted    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  lines JournalLine[]
+model Transaction {
+  id            String   @id @default(cuid())
+  date          DateTime
+  type          String // INCOME | EXPENSE
+  amount        Float
+  description   String
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id])
+  clientId      String?
+  client        Client?   @relation(fields: [clientId], references: [id])
+  reference     String? // invoice / UTR / receipt number
+  paymentMethod String   @default("BANK") // UPI | BANK | CARD | CASH
+  createdById   String?
+  createdBy     User?     @relation("TransactionCreator", fields: [createdById], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([date])
-  @@index([source])
+  @@index([type])
+  @@index([categoryId])
 }
 
-model JournalLine {
-  id        String   @id @default(cuid())
-  entryId   String
-  accountId String
-  debit     Float    @default(0)
-  credit    Float    @default(0)
-  memo      String?
+model Invoice {
+  id          String    @id @default(cuid())
+  number      String    @unique
+  clientId    String
+  client      Client    @relation(fields: [clientId], references: [id])
+  issueDate   DateTime
+  dueDate     DateTime?
+  status      String    @default("DRAFT") // DRAFT | SENT | PAID | OVERDUE
+  subtotal    Float     @default(0)
+  taxRate     Float     @default(18)
+  taxAmount   Float     @default(0)
+  total       Float     @default(0)
+  notes       String?
+  createdById String?
+  createdBy   User?     @relation("InvoiceCreator", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  entry   JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  account Account      @relation(fields: [accountId], references: [id])
-
-  @@index([entryId])
-  @@index([accountId])
-}
-
-// =============================
-// Customers (households)
-// =============================
-
-model Customer {
-  id               String    @id @default(cuid())
-  name             String
-  phone            String?
-  email            String?
-  city             String
-  locality         String?
-  address          String?
-  notes            String?
-  planType         String? // SILVER | GOLD | DIAMOND | null
-  planFee          Float?
-  planPurchaseDate DateTime?
-  planExpiryDate   DateTime?
-  placementsUsed   Int       @default(0)
-  maxPlacements    Int       @default(0)
-  status           String    @default("ACTIVE") // ACTIVE | EXPIRED | REFUNDED
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  placements Placement[]
-  planSales   PlanSale[]
-
-  @@index([city])
-  @@index([status])
-}
-
-// =============================
-// Helpers (domestic workers)
-// =============================
-
-model Helper {
-  id                  String   @id @default(cuid())
-  name                String
-  phone               String?
-  gender              String   @default("F") // F | M
-  city                String
-  locality            String?
-  serviceType         String   // FULL_TIME_MAID | PART_TIME_MAID | COOK | BABYSITTER | ELDER_CARE | DOMESTIC_HELP
-  expectedMonthlyRate Float?
-  aadhaarVerified     Boolean  @default(false)
-  policeVerified      Boolean  @default(false)
-  referenceChecked    Boolean  @default(false)
-  status              String   @default("PENDING") // PENDING | VERIFIED | PLACED | INACTIVE
-  notes               String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-
-  placements Placement[]
+  items InvoiceItem[]
 
   @@index([status])
-  @@index([city])
-  @@index([serviceType])
+  @@index([clientId])
+  @@index([issueDate])
 }
 
-// =============================
-// Placements
-// =============================
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Float   @default(1)
+  unitPrice   Float
+  amount      Float   @default(0)
 
-model Placement {
-  id             String    @id @default(cuid())
-  customerId     String
-  helperId       String
-  serviceType    String
-  startDate      DateTime
-  endDate        DateTime?
-  status         String    @default("ACTIVE") // ACTIVE | ENDED | REPLACED
-  isReplacement  Boolean   @default(false)
-  monthlyRate    Float? // agreed pay, goes directly to helper
-  notes          String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
-  customer Customer @relation(fields: [customerId], references: [id])
-  helper   Helper   @relation(fields: [helperId], references: [id])
-
-  @@index([customerId])
-  @@index([helperId])
-  @@index([status])
+  @@index([invoiceId])
 }
-
-// =============================
-// Plan Sales (platform fee revenue)
-// =============================
-
-model PlanSale {
-  id           String   @id @default(cuid())
-  customerId   String
-  planType     String   // SILVER | GOLD | DIAMOND
-  feeAmount    Float    // excluding GST
-  gstRate      Float    @default(18)
-  gstAmount    Float    @default(0)
-  totalAmount  Float    @default(0)
-  paymentMode  String   @default("UPI") // UPI | BANK | CARD | CASH
-  saleDate     DateTime
-  isRefunded   Boolean  @default(false)
-  refundAmount Float    @default(0)
-  createdAt    DateTime @default(now())
-
-  customer Customer @relation(fields: [customerId], references: [id])
-
-  @@index([customerId])
-  @@index([saleDate])
-  @@index([planType])
-}
-
-// =============================
-// Expenses
-// =============================
 
 model Expense {
-  id          String   @id @default(cuid())
-  date        DateTime
-  description String
-  amount      Float
-  category    String
-  paymentMode String   @default("BANK") // UPI | BANK | CARD | CASH
-  vendor      String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String    @id @default(cuid())
+  submittedById String
+  submitter    User      @relation("ExpenseSubmitter", fields: [submittedById], references: [id])
+  date         DateTime
+  amount       Float
+  categoryId   String?
+  category     Category? @relation(fields: [categoryId], references: [id])
+  description  String
+  receiptRef   String? // receipt number / attachment reference
+  status       String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  reviewedById String?
+  reviewer     User?     @relation("ExpenseReviewer", fields: [reviewedById], references: [id])
+  reviewNote   String?
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
+  @@index([status])
+  @@index([submittedById])
   @@index([date])
-  @@index([category])
 }
 
 // =============================
-// Settings
+// Governance
 // =============================
 
-model Setting {
-  id        String @id @default(cuid())
-  key       String @unique
-  value     String
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id])
+  action     String // LOGIN | LOGOUT | USER_CREATED | ROLE_CHANGED | ...
+  targetType String? // USER | TRANSACTION | INVOICE | EXPENSE | CLIENT | SETTINGS
+  targetId   String?
+  targetLabel String? // human-readable target, e.g. user email
+  detail     String? // JSON payload with before -> after values
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+  @@index([actorId])
+}
+
+model CompanySettings {
+  id          String   @id @default("singleton")
+  companyName String   @default("My Company")
+  currency    String   @default("INR")
+  taxRate     Float    @default(18)
+  email       String?
+  phone       String?
+  address     String?
+  updatedAt   DateTime @updatedAt
 }
