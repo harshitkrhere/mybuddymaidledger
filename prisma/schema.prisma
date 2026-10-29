@@ -1,0 +1,202 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // "sqlite" for local dev | "postgresql" for production (Neon/Supabase/Railway)
+  // Flip with: npm run db:use-postgres  /  npm run db:use-sqlite
+  // (Prisma does not allow env() for provider, so we swap the literal.)
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =============================
+// Chart of Accounts
+// =============================
+
+model Account {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  type      String   // ASSET | LIABILITY | EQUITY | REVENUE | EXPENSE
+  subtype   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  journalLines JournalLine[]
+}
+
+// =============================
+// Double-Entry Journal
+// =============================
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  entryNumber String   @unique
+  date        DateTime
+  memo        String
+  reference   String?
+  source      String   @default("MANUAL") // MANUAL | PLAN_SALE | EXPENSE | REFUND | OPENING
+  isPosted    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lines JournalLine[]
+
+  @@index([date])
+  @@index([source])
+}
+
+model JournalLine {
+  id        String   @id @default(cuid())
+  entryId   String
+  accountId String
+  debit     Float    @default(0)
+  credit    Float    @default(0)
+  memo      String?
+
+  entry   JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account Account      @relation(fields: [accountId], references: [id])
+
+  @@index([entryId])
+  @@index([accountId])
+}
+
+// =============================
+// Customers (households)
+// =============================
+
+model Customer {
+  id               String    @id @default(cuid())
+  name             String
+  phone            String?
+  email            String?
+  city             String
+  locality         String?
+  address          String?
+  notes            String?
+  planType         String? // SILVER | GOLD | DIAMOND | null
+  planFee          Float?
+  planPurchaseDate DateTime?
+  planExpiryDate   DateTime?
+  placementsUsed   Int       @default(0)
+  maxPlacements    Int       @default(0)
+  status           String    @default("ACTIVE") // ACTIVE | EXPIRED | REFUNDED
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  placements Placement[]
+  planSales   PlanSale[]
+
+  @@index([city])
+  @@index([status])
+}
+
+// =============================
+// Helpers (domestic workers)
+// =============================
+
+model Helper {
+  id                  String   @id @default(cuid())
+  name                String
+  phone               String?
+  gender              String   @default("F") // F | M
+  city                String
+  locality            String?
+  serviceType         String   // FULL_TIME_MAID | PART_TIME_MAID | COOK | BABYSITTER | ELDER_CARE | DOMESTIC_HELP
+  expectedMonthlyRate Float?
+  aadhaarVerified     Boolean  @default(false)
+  policeVerified      Boolean  @default(false)
+  referenceChecked    Boolean  @default(false)
+  status              String   @default("PENDING") // PENDING | VERIFIED | PLACED | INACTIVE
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  placements Placement[]
+
+  @@index([status])
+  @@index([city])
+  @@index([serviceType])
+}
+
+// =============================
+// Placements
+// =============================
+
+model Placement {
+  id             String    @id @default(cuid())
+  customerId     String
+  helperId       String
+  serviceType    String
+  startDate      DateTime
+  endDate        DateTime?
+  status         String    @default("ACTIVE") // ACTIVE | ENDED | REPLACED
+  isReplacement  Boolean   @default(false)
+  monthlyRate    Float? // agreed pay, goes directly to helper
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id])
+  helper   Helper   @relation(fields: [helperId], references: [id])
+
+  @@index([customerId])
+  @@index([helperId])
+  @@index([status])
+}
+
+// =============================
+// Plan Sales (platform fee revenue)
+// =============================
+
+model PlanSale {
+  id           String   @id @default(cuid())
+  customerId   String
+  planType     String   // SILVER | GOLD | DIAMOND
+  feeAmount    Float    // excluding GST
+  gstRate      Float    @default(18)
+  gstAmount    Float    @default(0)
+  totalAmount  Float    @default(0)
+  paymentMode  String   @default("UPI") // UPI | BANK | CARD | CASH
+  saleDate     DateTime
+  isRefunded   Boolean  @default(false)
+  refundAmount Float    @default(0)
+  createdAt    DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@index([saleDate])
+  @@index([planType])
+}
+
+// =============================
+// Expenses
+// =============================
+
+model Expense {
+  id          String   @id @default(cuid())
+  date        DateTime
+  description String
+  amount      Float
+  category    String
+  paymentMode String   @default("BANK") // UPI | BANK | CARD | CASH
+  vendor      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+  @@index([category])
+}
+
+// =============================
+// Settings
+// =============================
+
+model Setting {
+  id        String @id @default(cuid())
+  key       String @unique
+  value     String
+}

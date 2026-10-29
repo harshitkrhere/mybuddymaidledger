@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MyBuddyMaid — Accounts &amp; Operations</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+:root{
+  --paper:#F5EFE1; --paper-hi:#F9F4E8; --paper-lo:#ECE4CF;
+  --ink:#1F3A2B; --charcoal:#2B2B24; --muted:#6E6B5C; --faint:#94907D;
+  --rule:rgba(31,58,43,.34); --hair:rgba(31,58,43,.18); --hair2:rgba(31,58,43,.10);
+  --mint:#A9C4B0; --sage:#B9CDB4; --forest-mid:#476B57; --diamond:#C08A2E;
+  --amber:#B4822A; --amber-deep:#8F6511;
+  --serif:'Fraunces','Tinos','DejaVu Serif',serif;
+  --sans:'Archivo','Carlito','DejaVu Sans',sans-serif;
+  --mono:'IBM Plex Mono','Sarasa Mono SC','DejaVu Sans Mono',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box;border-radius:0}
+html,body{width:1536px;height:960px;overflow:hidden}
+body{font-family:var(--sans);color:var(--charcoal);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.sheet{position:relative;width:1536px;height:960px;display:flex;flex-direction:column;
+  background:radial-gradient(140% 100% at 28% -6%,var(--paper-hi) 0%,var(--paper) 52%,var(--paper-lo) 100%)}
+.grain{position:absolute;inset:0;z-index:40;pointer-events:none;mix-blend-mode:multiply;opacity:.5;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='280' height='280'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='matrix' values='0 0 0 0 .12  0 0 0 0 .11  0 0 0 0 .08  0 0 0 .05 0'/></filter><rect width='280' height='280' filter='url(%23n)'/></svg>")}
+
+/* ============ masthead ============ */
+.masthead{flex:none;height:64px;padding:0 40px;display:flex;align-items:center;gap:16px}
+.brand{display:flex;align-items:center;gap:15px}
+.seal{flex:none;transform:rotate(-5deg);opacity:.95}
+.wordmark{font-family:var(--serif);font-weight:600;font-size:22px;letter-spacing:.155em;color:var(--ink);line-height:1}
+.brand-sub{margin-top:6px;font-size:8.5px;letter-spacing:.235em;color:var(--muted);font-weight:500}
+.mast-right{margin-left:auto;display:flex;align-items:center;gap:24px}
+.sync{font-size:8.5px;letter-spacing:.17em;color:var(--faint);font-weight:500;white-space:nowrap}
+.search{display:flex;align-items:center;gap:10px;width:228px;padding:6px 2px 7px;border-bottom:1px solid var(--rule)}
+.search .ph{font-size:11.5px;color:var(--faint);font-style:italic;font-family:var(--serif);white-space:nowrap}
+.search .kbd{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--muted);border:1px solid var(--hair);padding:1px 5px}
+.user{display:flex;align-items:center;gap:10px}
+.avatar{width:30px;height:30px;background:var(--ink);color:var(--paper);font-family:var(--serif);font-weight:600;font-size:10.5px;letter-spacing:.06em;display:flex;align-items:center;justify-content:center}
+.who{display:flex;flex-direction:column;line-height:1.3}
+.who b{font-size:9px;letter-spacing:.14em;color:var(--ink);font-weight:600}
+.who i{font-style:normal;font-size:8px;letter-spacing:.18em;color:var(--faint)}
+
+/* ============ section index nav ============ */
+.sections{flex:none;height:46px;display:flex;align-items:stretch;padding:0 40px;border-top:1px solid var(--hair);border-bottom:3px double var(--rule)}
+.sections ol{display:flex;list-style:none}
+.sections li{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 20px}
+.sections li + li{border-left:1px solid var(--hair2)}
+.no{font-family:var(--mono);font-size:8px;color:var(--faint);letter-spacing:.08em}
+.lb{font-size:10.5px;font-weight:600;letter-spacing:.13em;color:var(--muted);white-space:nowrap}
+.sections li.on{background:var(--ink)}
+.sections li.on .no{color:rgba(245,239,225,.55)}
+.sections li.on .lb{color:var(--paper)}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:18px}
+.fy{font-size:9px;letter-spacing:.16em;color:var(--faint);font-weight:500;white-space:nowrap}
+.btn{font-family:var(--sans);font-size:10px;font-weight:600;letter-spacing:.14em;color:var(--paper);background:var(--ink);border:1px solid #142B1F;padding:8px 16px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(245,239,225,.16)}
+
+/* ============ body grid ============ */
+.body{flex:1;display:flex;padding:20px 40px 10px;min-height:0}
+.col-main{flex:0 0 942px;padding-right:32px;min-width:0}
+.margincol{flex:1;border-left:1px solid var(--hair);padding-left:32px;min-width:0}
+
+/* ============ figures ============ */
+.figures{display:flex;padding-top:6px}
+.hero{width:470px;flex:none}
+.k-label{display:flex;align-items:baseline;gap:12px;font-size:10px;font-weight:700;letter-spacing:.2em;color:var(--ink)}
+.k-label::before{content:'';width:7px;height:7px;background:var(--ink);align-self:center;margin-right:1px}
+.k-meta{font-size:8.5px;letter-spacing:.16em;color:var(--faint);font-weight:500}
+.bigfig{margin-top:12px;font-family:var(--serif);font-weight:600;color:var(--ink);line-height:.92;font-size:96px;letter-spacing:-.012em;white-space:nowrap}
+.bigfig .cur{font-size:.5em;vertical-align:.5em;font-weight:500;margin-right:1px}
+.bigfig .unit{font-size:.36em;vertical-align:1.02em;color:var(--muted);font-weight:500;margin-left:2px}
+.hero-note{margin-top:14px;max-width:428px;font-family:var(--serif);font-style:italic;font-size:13.5px;line-height:1.55;color:var(--muted)}
+.hero-note b{color:var(--ink);font-style:normal;font-weight:600}
+.statcol{flex:1;border-left:1px solid var(--hair);padding-left:30px;display:flex;flex-direction:column;justify-content:space-between;padding-top:4px;padding-bottom:4px}
+.stat-row{display:flex;align-items:flex-end}
+.s-label{font-size:9.5px;font-weight:600;letter-spacing:.18em;color:var(--muted);line-height:1;padding-bottom:6px;white-space:nowrap}
+.lead{flex:1;border-bottom:2px dotted rgba(31,58,43,.42);margin:0 12px 5px;min-width:30px}
+.s-val{font-family:var(--serif);font-weight:600;font-size:25px;color:var(--ink);line-height:1;white-space:nowrap}
+.stat.neg .s-val{color:var(--amber-deep)}
+.s-sub{margin-top:7px;font-size:8.5px;letter-spacing:.13em;color:var(--faint);font-weight:500;text-align:right;white-space:nowrap}
+.s-sub.amber{color:var(--amber-deep)}
+
+/* ============ section heads ============ */
+.sec-head{display:flex;align-items:baseline;gap:14px;border-top:1px solid var(--rule);padding-top:10px;margin-top:18px}
+.sec-head.plain{border-top:none;margin-top:0;padding-top:0}
+.sec-title{font-size:11px;font-weight:700;letter-spacing:.17em;color:var(--ink);display:flex;align-items:center;gap:9px;white-space:nowrap}
+.sec-title::before{content:'';width:7px;height:7px;background:var(--ink);flex:none}
+.sec-title i{font-family:var(--serif);font-style:italic;font-weight:400;font-size:12px;letter-spacing:0;text-transform:lowercase;color:var(--muted)}
+.sec-meta{font-size:8.5px;letter-spacing:.15em;color:var(--faint);font-weight:500;white-space:nowrap}
+.sec-link{margin-left:auto;font-size:9px;letter-spacing:.15em;color:var(--ink);font-weight:700;white-space:nowrap}
+.legend{margin-left:auto;display:flex;align-items:center;gap:16px}
+.lg{display:flex;align-items:center;gap:7px;font-size:8.5px;letter-spacing:.14em;color:var(--muted);font-weight:600;white-space:nowrap}
+.sw{width:18px;border-top:2.5px solid var(--ink);display:inline-block}
+.sw-exp{border-top-style:dashed;border-color:var(--amber)}
+.cum{font-size:8.5px;letter-spacing:.12em;color:var(--muted);border:1px solid var(--hair);padding:4px 9px;font-weight:600;white-space:nowrap}
+.cum b{color:var(--amber-deep);font-family:var(--mono);font-size:9.5px;letter-spacing:0;font-weight:600}
+
+/* ============ chart ============ */
+.chart{display:block;width:100%;height:auto;margin-top:8px}
+
+/* ============ ledger ============ */
+.ledger{width:100%;border-collapse:collapse;table-layout:fixed;margin-top:4px}
+.ledger th{font-size:8.5px;font-weight:700;letter-spacing:.15em;color:var(--muted);text-align:left;padding:7px 8px 6px 0;border-bottom:3px double var(--rule);white-space:nowrap}
+.ledger th.num{text-align:right}
+.ledger td{font-size:12.5px;padding:4px 8px 4px 0;border-bottom:1px solid var(--hair2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:baseline}
+.ledger td.num{text-align:right;font-family:var(--mono);font-size:12px}
+.ledger .dt{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+.ledger .ref{font-family:var(--mono);font-size:11px;color:var(--ink);font-weight:500}
+.ledger .pt{color:var(--charcoal)}
+.ledger .ct{font-size:9px;letter-spacing:.13em;color:var(--muted);font-weight:600}
+.ledger .amt{color:var(--charcoal)}
+.ledger .bal{font-weight:600;color:var(--ink)}
+.ledger .dash{color:var(--faint)}
+.tag{display:inline-block;font-size:7.5px;font-weight:700;letter-spacing:.12em;border:1px solid var(--rule);color:var(--ink);padding:1px 5px;margin-left:8px;vertical-align:2px}
+.tag.pend{border-color:rgba(180,130,42,.6);color:var(--amber-deep)}
+.ledger tfoot td{border-top:3px double var(--rule);border-bottom:none;padding:8px 8px 2px 0}
+.closing-lbl{font-size:9px;font-weight:700;letter-spacing:.16em;color:var(--ink)}
+.closing-val{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--ink)}
+
+/* ============ margin column ============ */
+.margincol section + section{margin-top:20px}
+.pf-big{display:flex;align-items:flex-end;gap:16px;margin-top:14px}
+.pf-num{font-family:var(--serif);font-weight:600;font-size:58px;line-height:.85;color:var(--ink)}
+.pf-side{display:flex;flex-direction:column;gap:6px;padding-bottom:5px}
+.pf-l1{font-size:9px;font-weight:700;letter-spacing:.18em;color:var(--muted)}
+.pf-l2{font-family:var(--serif);font-style:italic;font-size:12.5px;color:var(--muted)}
+.pf-bar{display:flex;height:15px;margin-top:16px}
+.pf-bar i{height:15px}
+.pf-bar i + i{border-left:3px solid var(--paper)}
+.pf-bar .silver{background:var(--sage);width:41.3%}
+.pf-bar .gold{background:var(--forest-mid);width:30.4%}
+.pf-bar .diamond{background:var(--diamond);width:28.3%}
+.pf-row{display:flex;align-items:flex-end;margin-top:13px}
+.sw2{width:8px;height:8px;flex:none;margin-right:9px;margin-bottom:2px}
+.sw2.silver{background:var(--sage)} .sw2.gold{background:var(--forest-mid)} .sw2.diamond{background:var(--diamond)}
+.pf-name{font-size:9.5px;font-weight:600;letter-spacing:.14em;color:var(--charcoal);padding-bottom:2px;white-space:nowrap}
+.pf-val{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--ink);line-height:1;padding-bottom:2px;white-space:nowrap}
+.city{margin-top:12px}
+.city-top{display:flex;align-items:baseline;gap:10px}
+.c-name{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--ink);white-space:nowrap}
+.hq{font-size:7px;font-weight:700;letter-spacing:.1em;border:1px solid var(--rule);color:var(--ink);padding:1px 4px;margin-left:2px;vertical-align:2px}
+.c-meta{font-size:8px;letter-spacing:.12em;color:var(--faint);font-weight:500;white-space:nowrap}
+.c-rev{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--ink);white-space:nowrap}
+.c-bar{margin-top:7px;height:4px;background:var(--hair2)}
+.c-bar i{display:block;height:4px;background:var(--ink)}
+.abs-grid{display:grid;grid-template-columns:1fr 1fr;margin-top:8px}
+.abs-cell{padding:14px 0 12px}
+.abs-cell:nth-child(odd){padding-right:12px}
+.abs-cell:nth-child(even){padding-left:20px;border-left:1px solid var(--hair)}
+.abs-cell:nth-child(-n+2){border-bottom:1px solid var(--hair);padding-bottom:14px}
+.abs-num{display:block;font-family:var(--serif);font-weight:600;font-size:38px;color:var(--ink);line-height:1}
+.abs-lbl{display:block;margin-top:8px;font-size:9px;font-weight:700;letter-spacing:.16em;color:var(--muted)}
+.abs-sub{display:block;margin-top:5px;font-family:var(--serif);font-style:italic;font-size:11.5px;color:var(--muted)}
+
+/* ============ folio footer ============ */
+.folio{flex:none;height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 40px;font-size:8.5px;letter-spacing:.15em;color:var(--faint);font-weight:600;border-top:1px solid var(--rule)}
+.folio-right{display:flex;gap:24px}
+.folio-right i{font-style:normal}
+.folio-right i.amber{color:var(--amber-deep)}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="grain"></div>
+
+  <header class="masthead">
+    <div class="brand">
+      <svg class="seal" width="42" height="42" viewBox="0 0 44 44" aria-hidden="true">
+        <defs><path id="sealArc" d="M 22,6.5 A 15.5,15.5 0 1 1 21.99,6.5"/></defs>
+        <circle cx="22" cy="22" r="20.4" fill="none" stroke="#1F3A2B" stroke-width="1.4"/>
+        <circle cx="22" cy="22" r="16.4" fill="none" stroke="#1F3A2B" stroke-width=".6" opacity=".5"/>
+        <text font-size="4.2" letter-spacing="1" fill="#1F3A2B" font-weight="600" font-family="Archivo, Carlito, sans-serif">
+          <textPath href="#sealArc" startOffset="6">MYBUDDYMAID · PATNA ·</textPath>
+        </text>
+        <text x="22" y="25.8" text-anchor="middle" font-family="Fraunces, Tinos, serif" font-size="11" font-weight="600" fill="#1F3A2B" letter-spacing=".8">MBM</text>
+      </svg>
+      <div>
+        <div class="wordmark">MYBUDDYMAID</div>
+        <div class="brand-sub">ACCOUNTS &amp; OPERATIONS · FIELD-SERVICE BOOKS · EST. 2023</div>
+      </div>
+    </div>
+    <div class="mast-right">
+      <div class="sync">SYNCED 09:42 IST · 99 ENTRIES</div>
+      <div class="search"><span class="ph">Search ledger, customers, helpers…</span><span class="kbd">⌘K</span></div>
+      <div class="user">
+        <div class="avatar">AV</div>
+        <div class="who"><b>A. VERMA</b><i>PROPRIETOR</i></div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="sections">
+    <ol>
+      <li class="on"><span class="no">01</span><span class="lb">DASHBOARD</span></li>
+      <li><span class="no">02</span><span class="lb">PLAN SALES</span></li>
+      <li><span class="no">03</span><span class="lb">CUSTOMERS</span></li>
+      <li><span class="no">04</span><span class="lb">HELPERS</span></li>
+      <li><span class="no">05</span><span class="lb">PLACEMENTS</span></li>
+      <li><span class="no">06</span><span class="lb">PAYMENTS</span></li>
+      <li><span class="no">07</span><span class="lb">ACCOUNTING</span></li>
+      <li><span class="no">08</span><span class="lb">REPORTS</span></li>
+      <li><span class="no">09</span><span class="lb">SETTINGS</span></li>
+    </ol>
+    <div class="nav-right">
+      <span class="fy">FY 2026–27 · GST 18%</span>
+      <button class="btn">+&nbsp;NEW ENTRY</button>
+    </div>
+  </nav>
+
+  <main class="body">
+    <section class="col-main">
+
+      <section class="figures">
+        <div class="hero">
+          <div class="k-label"><span>GROSS REVENUE</span><span class="k-meta">MAY – OCT 2026</span></div>
+          <div class="bigfig"><span class="cur">₹</span>2.9<span class="unit">L</span></div>
+          <div class="hero-note">Compounding <b>~18% month-on-month</b> since May — best month yet, <b>₹69,200</b> booked in October.</div>
+        </div>
+        <div class="statcol">
+          <div class="stat">
+            <div class="stat-row"><span class="s-label">CASH &amp; BANK</span><span class="lead"></span><span class="s-val">₹3.8L</span></div>
+            <div class="s-sub">HDFC CURRENT ×2 · PETTY CASH · ₹12K FLOAT</div>
+          </div>
+          <div class="stat neg">
+            <div class="stat-row"><span class="s-label">NET INCOME</span><span class="lead"></span><span class="s-val">−₹14.4K</span></div>
+            <div class="s-sub">MONTH-POSITIVE SINCE AUG · +₹23.6K IN OCT</div>
+          </div>
+          <div class="stat">
+            <div class="stat-row"><span class="s-label">GST PAYABLE</span><span class="lead"></span><span class="s-val">₹52.7K</span></div>
+            <div class="s-sub amber">GSTR-3B DUE 20 NOV · TAXABLE BASE ₹2.93L</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="chartblock">
+        <div class="sec-head">
+          <h2 class="sec-title">REVENUE <i>v</i> EXPENSES</h2>
+          <span class="sec-meta">MAY – OCT 2026 · FIGURES IN ₹ THOUSANDS</span>
+          <span class="legend">
+            <span class="lg"><i class="sw"></i>REVENUE</span>
+            <span class="lg"><i class="sw sw-exp"></i>EXPENSES</span>
+            <span class="cum">CUMULATIVE NET&nbsp;<b>−₹14.4K</b></span>
+          </span>
+        </div>
+        <svg class="chart" viewBox="0 0 916 230" font-family="Archivo, Carlito, sans-serif">
+          <g stroke="rgba(31,58,43,.20)" stroke-width="1" stroke-dasharray="1 4" stroke-linecap="round">
+            <line x1="30" y1="160" x2="910" y2="160"/>
+            <line x1="30" y1="124" x2="910" y2="124"/>
+            <line x1="30" y1="88" x2="910" y2="88"/>
+            <line x1="30" y1="52" x2="910" y2="52"/>
+            <line x1="30" y1="16" x2="910" y2="16"/>
+          </g>
+          <line x1="0" y1="196" x2="910" y2="196" stroke="rgba(31,58,43,.45)" stroke-width="1"/>
+          <g font-family="IBM Plex Mono, Sarasa Mono SC, monospace" font-size="8.5" fill="rgba(110,107,92,.95)" text-anchor="end">
+            <text x="24" y="199">0</text><text x="24" y="163">15</text><text x="24" y="127">30</text>
+            <text x="24" y="91">45</text><text x="24" y="55">60</text><text x="24" y="19">75</text>
+          </g>
+          <g font-size="9" letter-spacing="1.5" fill="#6E6B5C" text-anchor="middle" font-weight="600">
+            <text x="30" y="216">MAY</text><text x="206" y="216">JUN</text><text x="382" y="216">JUL</text>
+            <text x="558" y="216">AUG</text><text x="734" y="216">SEP</text><text x="910" y="216" text-anchor="end">OCT</text>
+          </g>
+          <polygon points="30,122.6 206,102.6 382,86.3 529.1,74.9 382,71.7 206,66.2 30,59.4" fill="rgba(180,130,42,.10)"/>
+          <polygon points="529.1,74.9 558,72.6 734,59.7 910,29.9 910,86.6 734,79.8 558,75.5" fill="rgba(76,120,96,.14)"/>
+          <line x1="529.1" y1="22" x2="529.1" y2="196" stroke="rgba(180,130,42,.55)" stroke-width="1" stroke-dasharray="1 3"/>
+          <text x="529.1" y="13" text-anchor="middle" font-size="8" letter-spacing="1.4" fill="#8F6511" font-weight="700"
+            stroke="rgba(245,239,225,.85)" stroke-width="3" paint-order="stroke">BREAKEVEN · AUG</text>
+          <path d="M30,59.4 L206,66.2 L382,71.7 L558,75.5 L734,79.8 L910,86.6" fill="none" stroke="#B4822A" stroke-width="2.2" stroke-dasharray="6 5" stroke-linejoin="round" stroke-linecap="round"/>
+          <path d="M30,122.6 L206,102.6 L382,86.3 L558,72.6 L734,59.7 L910,29.9" fill="none" stroke="#1F3A2B" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+          <g fill="#F5EFE1" stroke-width="1.8">
+            <g stroke="#B4822A">
+              <circle cx="30" cy="59.4" r="3"/><circle cx="206" cy="66.2" r="3"/><circle cx="382" cy="71.7" r="3"/>
+              <circle cx="558" cy="75.5" r="3"/><circle cx="734" cy="79.8" r="3"/><circle cx="910" cy="86.6" r="3"/>
+            </g>
+            <g stroke="#1F3A2B">
+              <circle cx="30" cy="122.6" r="3"/><circle cx="206" cy="102.6" r="3"/><circle cx="382" cy="86.3" r="3"/>
+              <circle cx="558" cy="72.6" r="3"/><circle cx="734" cy="59.7" r="3"/><circle cx="910" cy="29.9" r="3.4"/>
+            </g>
+          </g>
+          <text x="904" y="21" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="#1F3A2B">69.2K</text>
+          <text x="904" y="103" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="#8F6511">45.6K</text>
+          <text x="42" y="94" font-family="Fraunces, Tinos, serif" font-style="italic" font-size="11.5" fill="rgba(143,101,17,.95)"
+            stroke="rgba(245,239,225,.55)" stroke-width="3" paint-order="stroke">launch burn — setup &amp; training</text>
+          <text x="672" y="116" font-family="Fraunces, Tinos, serif" font-style="italic" font-size="11.5" fill="rgba(31,58,43,.8)"
+            stroke="rgba(245,239,225,.55)" stroke-width="3" paint-order="stroke">margin opens — +₹23.6K net in Oct</text>
+        </svg>
+      </section>
+
+      <section class="ledgerblock">
+        <div class="sec-head">
+          <h2 class="sec-title">RECENT LEDGER</h2>
+          <span class="sec-meta">9 OF 99 ENTRIES · THIS WEEK</span>
+          <a class="sec-link">OPEN FULL LEDGER →</a>
+        </div>
+        <table class="ledger">
+          <colgroup>
+            <col style="width:60px"><col style="width:74px"><col><col style="width:88px">
+            <col style="width:72px"><col style="width:78px"><col style="width:92px">
+          </colgroup>
+          <thead>
+            <tr><th>DATE</th><th>REF</th><th>PARTICULARS</th><th>CITY</th><th class="num">DEBIT ₹</th><th class="num">CREDIT ₹</th><th class="num">BALANCE ₹</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="dt">28 OCT</td><td class="ref">JV-0099</td><td class="pt">Electricity &amp; internet — Patna HQ office</td><td class="ct">PATNA</td><td class="num amt">4,860</td><td class="num dash">—</td><td class="num bal">3,78,414</td></tr>
+            <tr><td class="dt">28 OCT</td><td class="ref">RCPT-0241</td><td class="pt">Diamond plan renewal — Meenakshi Iyer<span class="tag">GST</span></td><td class="ct">CHENNAI</td><td class="num dash">—</td><td class="num amt">2,999</td><td class="num bal">3,83,274</td></tr>
+            <tr><td class="dt">27 OCT</td><td class="ref">RCPT-0240</td><td class="pt">Gold plan, 3 months — Priya Verma<span class="tag">GST</span></td><td class="ct">DELHI NCR</td><td class="num dash">—</td><td class="num amt">5,397</td><td class="num bal">3,80,275</td></tr>
+            <tr><td class="dt">27 OCT</td><td class="ref">PAY-0128</td><td class="pt">Helper payout, October — S. Devi<span class="tag pend">PENDING</span></td><td class="ct">PATNA</td><td class="num amt">18,600</td><td class="num dash">—</td><td class="num bal">3,74,878</td></tr>
+            <tr><td class="dt">26 OCT</td><td class="ref">INV-0207</td><td class="pt">Deep clean — Bhatia residence<span class="tag">GST</span></td><td class="ct">LUDHIANA</td><td class="num dash">—</td><td class="num amt">4,150</td><td class="num bal">3,93,478</td></tr>
+            <tr><td class="dt">25 OCT</td><td class="ref">RCPT-0238</td><td class="pt">Silver renewals × 3 — Ocean Blu Residency<span class="tag">GST</span></td><td class="ct">MUMBAI</td><td class="num dash">—</td><td class="num amt">2,997</td><td class="num bal">3,89,328</td></tr>
+            <tr><td class="dt">25 OCT</td><td class="ref">JV-0098</td><td class="pt">Consumables restock — Mumbai hub</td><td class="ct">MUMBAI</td><td class="num amt">7,240</td><td class="num dash">—</td><td class="num bal">3,86,331</td></tr>
+            <tr><td class="dt">24 OCT</td><td class="ref">INV-0205</td><td class="pt">Placement fee — Kaur household<span class="tag">GST</span></td><td class="ct">LUDHIANA</td><td class="num dash">—</td><td class="num amt">6,500</td><td class="num bal">3,93,571</td></tr>
+            <tr><td class="dt">24 OCT</td><td class="ref">RCPT-0237</td><td class="pt">Silver plan renewal — R. Nair<span class="tag">GST</span></td><td class="ct">DEHRADUN</td><td class="num dash">—</td><td class="num amt">999</td><td class="num bal">3,87,071</td></tr>
+          </tbody>
+          <tfoot>
+            <tr><td colspan="4" class="closing-lbl">CLOSING BALANCE — CASH &amp; BANK · 28 OCT 2026</td><td></td><td></td><td class="num closing-val">3,78,414</td></tr>
+          </tfoot>
+        </table>
+      </section>
+
+    </section>
+
+    <aside class="margincol">
+      <section class="portfolio">
+        <div class="sec-head plain">
+          <h2 class="sec-title">PLAN PORTFOLIO</h2>
+          <span class="sec-meta">46 ACTIVE</span>
+        </div>
+        <div class="pf-big">
+          <span class="pf-num">46</span>
+          <div class="pf-side">
+            <span class="pf-l1">ACTIVE SUBSCRIPTIONS</span>
+            <span class="pf-l2">₹83.2K monthly run-rate · ₹10.0L annualised</span>
+          </div>
+        </div>
+        <div class="pf-bar"><i class="silver"></i><i class="gold"></i><i class="diamond"></i></div>
+        <div class="pf-row"><i class="sw2 silver"></i><span class="pf-name">SILVER · ₹999/MO</span><span class="lead"></span><span class="pf-val">19 · 41%</span></div>
+        <div class="pf-row"><i class="sw2 gold"></i><span class="pf-name">GOLD · ₹1,799/MO</span><span class="lead"></span><span class="pf-val">14 · 30%</span></div>
+        <div class="pf-row"><i class="sw2 diamond"></i><span class="pf-name">DIAMOND · ₹2,999/MO</span><span class="lead"></span><span class="pf-val">13 · 28%</span></div>
+      </section>
+
+      <section class="cities">
+        <div class="sec-head">
+          <h2 class="sec-title">CITY OPERATIONS</h2>
+          <span class="sec-meta">6 CITIES · MAY–OCT REVENUE</span>
+        </div>
+        <div class="city">
+          <div class="city-top"><span class="c-name">PATNA<span class="hq">HQ</span></span><span class="c-meta">14 HOUSEHOLDS · 4 HELPERS</span><span class="c-rev">₹96.4K</span></div>
+          <div class="c-bar"><i style="width:100%"></i></div>
+        </div>
+        <div class="city">
+          <div class="city-top"><span class="c-name">DELHI NCR</span><span class="c-meta">11 HOUSEHOLDS · 2 HELPERS</span><span class="c-rev">₹78.2K</span></div>
+          <div class="c-bar"><i style="width:81%"></i></div>
+        </div>
+        <div class="city">
+          <div class="city-top"><span class="c-name">LUDHIANA</span><span class="c-meta">8 HOUSEHOLDS · 2 HELPERS</span><span class="c-rev">₹45.1K</span></div>
+          <div class="c-bar"><i style="width:47%"></i></div>
+        </div>
+        <div class="city">
+          <div class="city-top"><span class="c-name">MUMBAI</span><span class="c-meta">6 HOUSEHOLDS · 1 HELPER</span><span class="c-rev">₹32.8K</span></div>
+          <div class="c-bar"><i style="width:34%"></i></div>
+        </div>
+        <div class="city">
+          <div class="city-top"><span class="c-name">CHENNAI</span><span class="c-meta">5 HOUSEHOLDS · 1 HELPER</span><span class="c-rev">₹23.5K</span></div>
+          <div class="c-bar"><i style="width:24%"></i></div>
+        </div>
+        <div class="city">
+          <div class="city-top"><span class="c-name">DEHRADUN</span><span class="c-meta">4 HOUSEHOLDS · 1 HELPER</span><span class="c-rev">₹16.6K</span></div>
+          <div class="c-bar"><i style="width:17%"></i></div>
+        </div>
+      </section>
+
+      <section class="abstract">
+        <div class="sec-head">
+          <h2 class="sec-title">OPERATIONS</h2>
+          <span class="sec-meta">AT A GLANCE</span>
+        </div>
+        <div class="abs-grid">
+          <div class="abs-cell"><span class="abs-num">50</span><span class="abs-lbl">PLAN SALES</span><span class="abs-sub">8 booked in October</span></div>
+          <div class="abs-cell"><span class="abs-num">48</span><span class="abs-lbl">CUSTOMERS</span><span class="abs-sub">across six cities</span></div>
+          <div class="abs-cell"><span class="abs-num">10</span><span class="abs-lbl">VERIFIED HELPERS</span><span class="abs-sub">background-checked</span></div>
+          <div class="abs-cell"><span class="abs-num">12</span><span class="abs-lbl">ACTIVE PLACEMENTS</span><span class="abs-sub">median tenure 3.1 months</span></div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="folio">
+    <span>BOOKS CLOSED THROUGH 28 OCT 2026 · 99 JOURNAL ENTRIES · AUDIT TRAIL ACTIVE</span>
+    <span class="folio-right"><i class="amber">GSTR-3B DUE 20 NOV</i><i>FOLIO 01 — DASHBOARD</i><i>ALL FIGURES INR</i></span>
+  </footer>
+</div>
+</body>
+</html>

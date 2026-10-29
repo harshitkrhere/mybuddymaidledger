@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "**Transcription:**\n`LAST SIX MONTHS : FIGURES IN ₹ THOUSANDS`\n\n**Glyph Quality:** No, all characters are fully formed and legible. There are no broken glyphs, tofu boxes (□), or garbled letters.\n\n**Y-Axis Numbers:** The small y-axis numbers on the far left (15, 30, 45...) are **too faint** to read in this crop; they are not visible.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793250045,
+  "id": "20261029130042a67f50c731a946a3",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261029130042a67f50c731a946a3",
+  "usage": {
+    "completion_tokens": 92,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 620,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 712
+  }
+}

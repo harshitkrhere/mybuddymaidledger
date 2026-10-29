@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "*   **Italic serif annotation (bottom center-left):** `BREAKEVEN · OCT`\n*   **Mono value labels (far right edge):** `₹69` (top), `₹52` (bottom)\n*   **Broken glyphs/tofu boxes:** None visible.\n*   **Small numbers on the far left:** No, they are not present or readable in this crop.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793250069,
+  "id": "20261029130108b8c8dcbcbf6d4f7c",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261029130108b8c8dcbcbf6d4f7c",
+  "usage": {
+    "completion_tokens": 83,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 422,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 505
+  }
+}
