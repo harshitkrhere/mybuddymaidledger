@@ -2,18 +2,18 @@ import { NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
 import { audit, createSession, SESSION_COOKIE, SESSION_TTL_MS } from "@/lib/auth"
-import { readJson } from "@/lib/api-helpers"
+import { readJson, route } from "@/lib/api-helpers"
+import { LoginSchema, parseWith } from "@/lib/validation"
 
 // POST /api/auth/login — the ONLY public endpoint in the portal.
-// There is no signup: accounts are created by Red/Admin from the Team module.
-export async function POST(req: Request) {
-  const body = await readJson<{ email?: string; password?: string }>(req)
-  const email = (body?.email ?? "").trim().toLowerCase()
-  const password = body?.password ?? ""
-
-  if (!email || !password) {
+// There is no signup: accounts are created by Red/Admin from the
+// Team module. Payload is Zod-validated before any DB lookup.
+export const POST = route("auth.login", async (req) => {
+  const parsed = parseWith(LoginSchema, await readJson(req))
+  if (!parsed.ok) {
     return NextResponse.json({ error: "Please enter your email and password." }, { status: 400 })
   }
+  const { email, password } = parsed.value
 
   const user = await db.user.findUnique({ where: { email } })
 
@@ -56,4 +56,4 @@ export async function POST(req: Request) {
     maxAge: SESSION_TTL_MS / 1000,
   })
   return res
-}
+})

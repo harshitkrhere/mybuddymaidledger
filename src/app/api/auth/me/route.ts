@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server"
 import { getSessionUser } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { route } from "@/lib/api-helpers"
 import { assignableRoles, canEditCompanySettings, ROLE_LABEL } from "@/lib/permissions"
 
 // GET /api/auth/me — returns the signed-in user plus client-side capability
 // flags. 401 when unauthenticated; the SPA then shows the login screen.
-export async function GET() {
+// Role is read fresh from the database on every request, so any role
+// change is reflected here immediately (zero privilege drift).
+export const GET = route("auth.me", async () => {
   const user = await getSessionUser()
   if (!user) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 })
@@ -36,4 +39,4 @@ export async function GET() {
       : null,
     roleLabel: ROLE_LABEL[user.role],
   })
-}
+})

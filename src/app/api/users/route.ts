@@ -1,8 +1,9 @@
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
 import { audit } from "@/lib/auth"
-import { fail, ok, readJson, requireRole } from "@/lib/api-helpers"
+import { fail, ok, readJson, requireRole, route } from "@/lib/api-helpers"
 import { assignableRoles, isRole, ROLE_RANK } from "@/lib/permissions"
+import { CreateUserSchema, parseWith } from "@/lib/validation"
 
 // ============================================================
 // /api/users — Team management (Red & Admin only)
@@ -11,7 +12,7 @@ import { assignableRoles, isRole, ROLE_RANK } from "@/lib/permissions"
 // ============================================================
 
 // GET — list all users (Red/Admin only)
-export async function GET() {
+export const GET = route("users.list", async () => {
   const guard = await requireRole("RED", "ADMIN")
   if ("response" in guard) return guard.response
 
@@ -44,31 +45,18 @@ export async function GET() {
     users: sorted.map((u) => ({ ...u, pendingExpenses: pendingByUser.get(u.id) ?? 0 })),
     assignableRoles: assignableRoles(guard.user.role),
   })
-}
+})
 
 // POST — create a user. Red may create any role; Admin may ONLY create
 // Managers and Employees. Crafted requests are rejected and audited.
-export async function POST(req: Request) {
+export const POST = route("users.create", async (req) => {
   const guard = await requireRole("RED", "ADMIN")
   if ("response" in guard) return guard.response
   const actor = guard.user
 
-  const body = await readJson<{ name?: string; email?: string; password?: string; role?: string; title?: string }>(req)
-  const name = (body?.name ?? "").trim()
-  const email = (body?.email ?? "").trim().toLowerCase()
-  const password = body?.password ?? ""
-  const role = body?.role ?? ""
-  const title = (body?.title ?? "").trim() || null
-
-  if (!name || !email || !password || !role) {
-    return fail(400, "Name, email, password and role are all required.")
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return fail(400, "That email address doesn't look right.")
-  }
-  if (password.length < 8) {
-    return fail(400, "Passwords must be at least 8 characters.")
-  }
+  const parsed = parseWith(CreateUserSchema, await readJson(req))
+  if (!parsed.ok) return fail(400, parsed.error)
+  const { name, email, password, role, title } = parsed.value
 
   // --- The hierarchy gate: Admins can never mint Admins (or Reds). ---
   if (!isRole(role) || !assignableRoles(actor.role).includes(role)) {
@@ -103,4 +91,4 @@ export async function POST(req: Request) {
   })
 
   return ok({ user }, 201)
-}
+})

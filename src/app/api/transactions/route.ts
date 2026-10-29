@@ -1,16 +1,17 @@
 import { db } from "@/lib/db"
 import { audit } from "@/lib/auth"
-import { fail, ok, readJson, requireModule } from "@/lib/api-helpers"
-import { validateTxBody } from "@/lib/finance-validation"
+import { fail, ok, readJson, requireModule, route } from "@/lib/api-helpers"
+import { parseWith, TransactionSchema } from "@/lib/validation"
 
 // ============================================================
 // /api/transactions — the income/expense ledger (finance roles).
 // Employees have no access to this module at all.
+// Every payload is Zod-validated before touching the database.
 // ============================================================
 
 const PAGE_SIZE = 12
 
-export async function GET(req: Request) {
+export const GET = route("transactions.list", async (req) => {
   const guard = await requireModule("transactions")
   if ("response" in guard) return guard.response
 
@@ -19,7 +20,7 @@ export async function GET(req: Request) {
   const categoryId = url.searchParams.get("categoryId")
   const from = url.searchParams.get("from")
   const to = url.searchParams.get("to")
-  const search = (url.searchParams.get("q") ?? "").trim()
+  const search = (url.searchParams.get("q") ?? "").trim().slice(0, 200)
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1)
 
   const where: Record<string, unknown> = {}
@@ -27,8 +28,8 @@ export async function GET(req: Request) {
   if (categoryId) where.categoryId = categoryId
   if (from || to) {
     where.date = {
-      ...(from ? { gte: new Date(from) } : {}),
-      ...(to ? { lte: new Date(`${to}T23:59:59`) } : {}),
+      ...(from && !isNaN(Date.parse(from)) ? { gte: new Date(from) } : {}),
+      ...(to && !isNaN(Date.parse(to)) ? { lte: new Date(`${to}T23:59:59`) } : {}),
     }
   }
   if (search) {
@@ -72,38 +73,35 @@ export async function GET(req: Request) {
     pagination: { page, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)), total },
     totals: { income, expense, net: income - expense },
   })
-}
+})
 
-type TxBody = {
-  date?: string
-  type?: string
-  amount?: number
-  description?: string
-  categoryId?: string | null
-  clientId?: string | null
-  reference?: string | null
-  paymentMethod?: string
-}
-
-export async function POST(req: Request) {
+export const POST = route("transactions.create", async (req) => {
   const guard = await requireModule("transactions")
   if ("response" in guard) return guard.response
   const actor = guard.user
 
-  const body = await readJson<TxBody>(req)
-  const error = validateTxBody(body)
-  if (error) return fail(400, error)
+  const parsed = parseWith(TransactionSchema, await readJson(req))
+  if (!parsed.ok) return fail(400, parsed.error)
+  const body = parsed.value
+
+  // Referential integrity: optional category / client must exist.
+  if (body.categoryId && !(await db.category.findUnique({ where: { id: body.categoryId } }))) {
+    return fail(400, "That category no longer exists.")
+  }
+  if (body.clientId && !(await db.client.findUnique({ where: { id: body.clientId } }))) {
+    return fail(400, "That client no longer exists.")
+  }
 
   const tx = await db.transaction.create({
     data: {
-      date: new Date(body!.date!),
-      type: body!.type!,
-      amount: body!.amount!,
-      description: body!.description!.trim(),
-      categoryId: body!.categoryId || null,
-      clientId: body!.clientId || null,
-      reference: (body!.reference ?? "").trim() || null,
-      paymentMethod: body!.paymentMethod ?? "BANK",
+      date: new Date(body.date),
+      type: body.type,
+      amount: body.amount,
+      description: body.description,
+      categoryId: body.categoryId,
+      clientId: body.clientId,
+      reference: body.reference,
+      paymentMethod: body.paymentMethod,
       createdById: actor.id,
     },
     include: {
@@ -123,4 +121,4 @@ export async function POST(req: Request) {
   })
 
   return ok({ transaction: tx }, 201)
-}
+})

@@ -1,17 +1,19 @@
 import { db } from "@/lib/db"
 import { audit } from "@/lib/auth"
-import { fail, ok, readJson, requireUser } from "@/lib/api-helpers"
-import { canApproveExpenses, canManageFinance } from "@/lib/permissions"
+import { fail, ok, readJson, requireUser, route } from "@/lib/api-helpers"
+import { canApproveExpenses } from "@/lib/permissions"
+import { ExpenseSchema, parseWith } from "@/lib/validation"
 
 // ============================================================
 // /api/expenses — everyone can submit their own expenses.
 // Approvers (Red / Admin / Manager) review submissions.
-// Employees only ever see their own records.
+// Employees are hard-scoped to their own records — the query
+// filter below is the tenant boundary for this module.
 // ============================================================
 
 const PAGE_SIZE = 10
 
-export async function GET(req: Request) {
+export const GET = route("expenses.list", async (req) => {
   const guard = await requireUser()
   if ("response" in guard) return guard.response
   const user = guard.user
@@ -21,7 +23,7 @@ export async function GET(req: Request) {
   const status = url.searchParams.get("status")
   const categoryId = url.searchParams.get("categoryId")
   const submittedById = url.searchParams.get("submittedById")
-  const search = (url.searchParams.get("q") ?? "").trim()
+  const search = (url.searchParams.get("q") ?? "").trim().slice(0, 200)
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1)
 
   const where: Record<string, unknown> = {}
@@ -77,35 +79,29 @@ export async function GET(req: Request) {
       rejected: sumOf("REJECTED"),
     },
   })
-}
+})
 
-type ExpenseBody = {
-  date?: string
-  amount?: number
-  description?: string
-  categoryId?: string | null
-  receiptRef?: string | null
-}
-
-export async function POST(req: Request) {
+export const POST = route("expenses.create", async (req) => {
   const guard = await requireUser()
   if ("response" in guard) return guard.response
   const user = guard.user
 
-  const body = await readJson<ExpenseBody>(req)
-  if (!body) return fail(400, "Missing expense details.")
-  if (!body.date || isNaN(Date.parse(body.date))) return fail(400, "Please pick a valid date.")
-  if (!body.amount || body.amount <= 0) return fail(400, "Amount must be greater than zero.")
-  if (!(body.description ?? "").trim()) return fail(400, "Please describe the expense.")
+  const parsed = parseWith(ExpenseSchema, await readJson(req))
+  if (!parsed.ok) return fail(400, parsed.error)
+  const body = parsed.value
+
+  if (body.categoryId && !(await db.category.findUnique({ where: { id: body.categoryId } }))) {
+    return fail(400, "That category no longer exists.")
+  }
 
   const expense = await db.expense.create({
     data: {
       submittedById: user.id,
-      date: new Date(body.date!),
-      amount: body.amount!,
-      description: body.description!.trim(),
-      categoryId: body.categoryId || null,
-      receiptRef: (body.receiptRef ?? "").trim() || null,
+      date: new Date(body.date),
+      amount: body.amount,
+      description: body.description,
+      categoryId: body.categoryId,
+      receiptRef: body.receiptRef,
     },
     include: {
       category: true,
@@ -124,4 +120,4 @@ export async function POST(req: Request) {
   })
 
   return ok({ expense }, 201)
-}
+})

@@ -81,7 +81,7 @@ Four roles, strictly ranked from highest to lowest:
 
 ## 7. Tech stack
 
-Next.js 16 (App Router) + TypeScript, Tailwind CSS 4, shadcn/ui, Prisma + SQLite, Recharts, bcrypt, cookie sessions. Clean, modular, commented code.
+Next.js 16 (App Router) + TypeScript, Tailwind CSS 4, shadcn/ui, Prisma + PostgreSQL (Neon in production; embedded PostgreSQL 18 in local dev — same engine and migrations), Recharts, bcrypt, cookie sessions. Clean, modular, commented code.
 
 ## 8. Data model (minimum)
 

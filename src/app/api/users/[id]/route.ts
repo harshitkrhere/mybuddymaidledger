@@ -1,8 +1,9 @@
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
 import { audit } from "@/lib/auth"
-import { fail, ok, readJson, requireRole } from "@/lib/api-helpers"
-import { canChangeRoleOf, canDeactivate, isRole } from "@/lib/permissions"
+import { fail, ok, readJson, requireRole, route } from "@/lib/api-helpers"
+import { canChangeRoleOf, canDeactivate, isRole, type Role } from "@/lib/permissions"
+import { parseWith, UserPatchSchema } from "@/lib/validation"
 
 // ============================================================
 // /api/users/[id] — role changes, activation, password resets.
@@ -10,18 +11,13 @@ import { canChangeRoleOf, canDeactivate, isRole } from "@/lib/permissions"
 //   · Nobody changes their own role or deactivates themselves.
 //   · Red edits anyone; Admin edits only Managers/Employees.
 //   · Only Red can grant or revoke the Admin role.
+// Role changes take effect on the very next request: the session
+// resolves the role fresh from the database each time.
 // ============================================================
 
-type PatchBody = {
-  action?: "setRole" | "setStatus" | "resetPassword" | "updateProfile"
-  role?: string
-  status?: string
-  password?: string
-  name?: string
-  title?: string
-}
+type Ctx = { params: Promise<{ id: string }> }
 
-export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+export const PATCH = route<Ctx>("users.update", async (req, ctx) => {
   const guard = await requireRole("RED", "ADMIN")
   if ("response" in guard) return guard.response
   const actor = guard.user
@@ -29,18 +25,22 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   const target = await db.user.findUnique({ where: { id } })
   if (!target) return fail(404, "That user no longer exists.")
+  if (!isRole(target.role)) return fail(409, "That user's role is not recognised — please contact Red.")
+  const targetRole: Role = target.role
 
   const isSelf = target.id === actor.id
-  const body = await readJson<PatchBody>(req)
-  if (!body?.action) return fail(400, "Missing action.")
+
+  const parsed = parseWith(UserPatchSchema, await readJson(req))
+  if (!parsed.ok) return fail(400, parsed.error)
+  const body = parsed.value
 
   // ---------- Role change ----------
   if (body.action === "setRole") {
-    const nextRole = body.role ?? ""
+    const nextRole = body.role
     if (!isRole(nextRole)) return fail(400, "Unknown role.")
     if (isSelf) return fail(403, "You cannot change your own role.")
     if (nextRole === target.role) return fail(400, "That user already has this role.")
-    if (!canChangeRoleOf(actor.role, target.role, nextRole)) {
+    if (!canChangeRoleOf(actor.role, targetRole, nextRole)) {
       await audit({
         actorId: actor.id,
         action: "ROLE_CHANGE_BLOCKED",
@@ -66,11 +66,10 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   // ---------- Activate / deactivate ----------
   if (body.action === "setStatus") {
-    const status = body.status ?? ""
-    if (status !== "ACTIVE" && status !== "INACTIVE") return fail(400, "Unknown status.")
+    const status = body.status
     if (isSelf) return fail(403, "You cannot deactivate your own account.")
     if (target.role === "RED" && actor.role !== "RED") return fail(403, "You cannot modify a Red account.")
-    if (!canDeactivate(actor.role, target.role)) {
+    if (!canDeactivate(actor.role, targetRole)) {
       await audit({
         actorId: actor.id,
         action: "STATUS_CHANGE_BLOCKED",
@@ -82,11 +81,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       return fail(403, "Your role does not allow this change.")
     }
 
-    await db.user.update({ where: { id: target.id }, data: { status } })
-    if (status === "INACTIVE") {
-      // Purge sessions so the lockout is immediate.
-      await db.session.deleteMany({ where: { userId: target.id } })
-    }
+    // Deactivation and session purge land together; sessions are also
+    // rejected lazily on every request, so the lockout is immediate.
+    await db.$transaction([
+      db.user.update({ where: { id: target.id }, data: { status } }),
+      ...(status === "INACTIVE" ? [db.session.deleteMany({ where: { userId: target.id } })] : []),
+    ])
     await audit({
       actorId: actor.id,
       action: status === "INACTIVE" ? "USER_DEACTIVATED" : "USER_ACTIVATED",
@@ -100,16 +100,16 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   // ---------- Password reset (performed by Red/Admin) ----------
   if (body.action === "resetPassword") {
-    const password = body.password ?? ""
     if (isSelf) return fail(403, "Use Settings to change your own password.")
-    if (password.length < 8) return fail(400, "Passwords must be at least 8 characters.")
     if (actor.role !== "RED" && (target.role === "ADMIN" || target.role === "RED")) {
       return fail(403, "Your role does not allow resetting that password.")
     }
 
-    const passwordHash = await bcrypt.hash(password, 10)
-    await db.user.update({ where: { id: target.id }, data: { passwordHash } })
-    await db.session.deleteMany({ where: { userId: target.id } }) // force re-login
+    const passwordHash = await bcrypt.hash(body.password, 10)
+    await db.$transaction([
+      db.user.update({ where: { id: target.id }, data: { passwordHash } }),
+      db.session.deleteMany({ where: { userId: target.id } }), // force re-login
+    ])
     await audit({
       actorId: actor.id,
       action: "PASSWORD_RESET",
@@ -125,21 +125,18 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     if (actor.role !== "RED" && target.role !== "MANAGER" && target.role !== "EMPLOYEE") {
       return fail(403, "Your role does not allow editing that profile.")
     }
-    const name = (body.name ?? "").trim()
-    const title = (body.title ?? "").trim() || null
-    if (!name) return fail(400, "Name cannot be empty.")
 
-    await db.user.update({ where: { id: target.id }, data: { name, title } })
+    await db.user.update({ where: { id: target.id }, data: { name: body.name, title: body.title } })
     await audit({
       actorId: actor.id,
       action: "USER_PROFILE_UPDATED",
       targetType: "USER",
       targetId: target.id,
       targetLabel: target.email,
-      detail: { name, title },
+      detail: { name: body.name, title: body.title },
     })
     return ok({ ok: true })
   }
 
   return fail(400, "Unsupported action.")
-}
+})

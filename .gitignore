@@ -53,3 +53,9 @@ server.log
 # Skills directory
 /skills/
 .neon
+
+# local PostgreSQL runtime (embedded dev cluster + server log)
+db/pgdata/
+db/pg.log
+db/.pgpw
+db/.runtime.env

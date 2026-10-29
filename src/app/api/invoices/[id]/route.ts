@@ -1,17 +1,23 @@
 import { db } from "@/lib/db"
 import { audit } from "@/lib/auth"
-import { fail, ok, readJson, requireModule, requireRole } from "@/lib/api-helpers"
-import { computeInvoiceTotals, validateInvoiceBody } from "@/lib/finance-validation"
+import { fail, ok, readJson, requireModule, requireRole, route } from "@/lib/api-helpers"
+import { computeInvoiceTotals, InvoiceSchema, InvoiceStatusSchema, parseWith } from "@/lib/validation"
+import { z } from "zod"
 
 // ============================================================
 // /api/invoices/[id] — edit invoice, change status, delete.
+//
+// The full edit replaces line items ATOMICALLY: item deletion and
+// re-creation run in the same database transaction as the invoice
+// update, so a failure mid-way can never leave an invoice without
+// its items (zero state drift between invoice and line items).
 // ============================================================
 
-type PatchBody =
-  | { action: "setStatus"; status: string }
-  | (Parameters<typeof validateInvoiceBody>[0] & { action?: undefined })
+type Ctx = { params: Promise<{ id: string }> }
 
-export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+const StatusPatchSchema = z.object({ action: z.literal("setStatus"), status: InvoiceStatusSchema })
+
+export const PATCH = route<Ctx>("invoices.update", async (req, ctx) => {
   const guard = await requireModule("invoices")
   if ("response" in guard) return guard.response
   const actor = guard.user
@@ -20,12 +26,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const existing = await db.invoice.findUnique({ where: { id }, include: { client: true } })
   if (!existing) return fail(404, "That invoice no longer exists.")
 
-  const body = await readJson<PatchBody>(req)
+  const body = await readJson(req)
 
   // ---------- Status transitions (mark sent / paid / back to draft) ----------
-  if (body && body.action === "setStatus") {
-    const status = body.status ?? ""
-    if (!["DRAFT", "SENT", "PAID"].includes(status)) return fail(400, "Unknown status.")
+  const statusPatch = parseWith(StatusPatchSchema, body)
+  if (statusPatch.ok) {
+    const status = statusPatch.value.status
     if (status === existing.status) return fail(400, "The invoice already has this status.")
 
     await db.invoice.update({ where: { id }, data: { status } })
@@ -41,34 +47,41 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   // ---------- Full edit (line items replaced atomically) ----------
-  const error = validateInvoiceBody(body)
-  if (error) return fail(400, error)
+  const parsed = parseWith(InvoiceSchema, body)
+  if (!parsed.ok) {
+    // Distinguish "not a status patch AND not a valid edit" from a plain bad payload:
+    // if the body carried an unknown action, say so explicitly.
+    if (body && "action" in (body as Record<string, unknown>)) return fail(400, "Unsupported action.")
+    return fail(400, parsed.error)
+  }
+  const edit = parsed.value
 
-  const client = await db.client.findUnique({ where: { id: body!.clientId! } })
+  const client = await db.client.findUnique({ where: { id: edit.clientId } })
   if (!client) return fail(400, "That client no longer exists.")
 
-  const taxRate = body!.taxRate ?? 18
-  const { lines, subtotal, taxAmount, total } = computeInvoiceTotals(body!.items!, taxRate)
+  const { lines, subtotal, taxAmount, total } = computeInvoiceTotals(edit.items, edit.taxRate)
 
-  await db.invoiceItem.deleteMany({ where: { invoiceId: id } })
-  const invoice = await db.invoice.update({
-    where: { id },
-    data: {
-      clientId: client.id,
-      issueDate: new Date(body!.issueDate!),
-      dueDate: body!.dueDate ? new Date(body!.dueDate) : null,
-      notes: (body!.notes ?? "").trim() || null,
-      taxRate,
-      subtotal,
-      taxAmount,
-      total,
-      items: { create: lines },
-    },
-    include: {
-      client: { select: { id: true, name: true, type: true } },
-      createdBy: { select: { id: true, name: true } },
-      items: true,
-    },
+  const invoice = await db.$transaction(async (tx) => {
+    await tx.invoiceItem.deleteMany({ where: { invoiceId: id } })
+    return tx.invoice.update({
+      where: { id },
+      data: {
+        clientId: client.id,
+        issueDate: new Date(edit.issueDate),
+        dueDate: edit.dueDate ? new Date(edit.dueDate) : null,
+        notes: edit.notes,
+        taxRate: edit.taxRate,
+        subtotal,
+        taxAmount,
+        total,
+        items: { create: lines },
+      },
+      include: {
+        client: { select: { id: true, name: true, type: true } },
+        createdBy: { select: { id: true, name: true } },
+        items: true,
+      },
+    })
   })
 
   await audit({
@@ -84,9 +97,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   })
 
   return ok({ invoice })
-}
+})
 
-export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export const DELETE = route<Ctx>("invoices.delete", async (_req, ctx) => {
   const guard = await requireRole("RED", "ADMIN")
   if ("response" in guard) return guard.response
   const { id } = await ctx.params
@@ -105,4 +118,4 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   })
 
   return ok({ ok: true })
-}
+})

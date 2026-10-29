@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
 import { audit, destroySession, getSessionToken, getSessionUser, SESSION_COOKIE } from "@/lib/auth"
+import { route } from "@/lib/api-helpers"
 
 // POST /api/auth/logout — destroys the server-side session and clears the cookie.
-export async function POST() {
+export const POST = route("auth.logout", async () => {
   const user = await getSessionUser()
   const token = await getSessionToken()
   if (token) await destroySession(token)
@@ -12,4 +13,4 @@ export async function POST() {
   const res = NextResponse.json({ ok: true })
   res.cookies.set(SESSION_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 })
   return res
-}
+})

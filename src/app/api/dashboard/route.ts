@@ -1,5 +1,5 @@
 import { db } from "@/lib/db"
-import { ok, requireUser } from "@/lib/api-helpers"
+import { ok, requireUser, route } from "@/lib/api-helpers"
 import { canApproveExpenses } from "@/lib/permissions"
 
 // ============================================================
@@ -23,7 +23,7 @@ function lastNMonths(n: number) {
   return months
 }
 
-export async function GET() {
+export const GET = route("dashboard.get", async () => {
   const guard = await requireUser()
   if ("response" in guard) return guard.response
   const user = guard.user
@@ -144,7 +144,7 @@ export async function GET() {
   const lifetimeIncome = sumByType("INCOME")
   const lifetimeExpense = sumByType("EXPENSE")
 
-  const categoryIds = topExpenseCats.map((t) => t.categoryId).filter(Boolean)
+  const categoryIds = topExpenseCats.map((t) => t.categoryId).filter((id): id is string => Boolean(id))
   const categories = await db.category.findMany({ where: { id: { in: categoryIds } } })
   const catName = (id: string | null) => categories.find((c) => c.id === id)?.name ?? "Uncategorized"
 
@@ -192,4 +192,4 @@ export async function GET() {
       amount: t._sum.amount ?? 0,
     })),
   })
-}
+})

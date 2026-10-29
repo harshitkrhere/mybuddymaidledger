@@ -1,19 +1,20 @@
 import { db } from "@/lib/db"
 import { audit } from "@/lib/auth"
-import { fail, ok, readJson, requireModule } from "@/lib/api-helpers"
+import { fail, ok, readJson, requireModule, route } from "@/lib/api-helpers"
+import { ClientSchema, parseWith } from "@/lib/validation"
 
 // ============================================================
 // /api/clients — clients & vendors directory (finance roles).
 // Outstanding balance per client derived from SENT invoices.
 // ============================================================
 
-export async function GET(req: Request) {
+export const GET = route("clients.list", async (req) => {
   const guard = await requireModule("clients")
   if ("response" in guard) return guard.response
 
   const url = new URL(req.url)
   const type = url.searchParams.get("type") // CLIENT | VENDOR | (all)
-  const search = (url.searchParams.get("q") ?? "").trim()
+  const search = (url.searchParams.get("q") ?? "").trim().slice(0, 200)
 
   const where: Record<string, unknown> = {}
   if (type === "CLIENT" || type === "VENDOR") where.type = type
@@ -56,36 +57,25 @@ export async function GET(req: Request) {
       lifetimeBilled: billedMap.get(c.id) ?? 0,
     })),
   })
-}
+})
 
-type ClientBody = {
-  name?: string
-  type?: string
-  email?: string
-  phone?: string
-  address?: string
-  notes?: string
-}
-
-export async function POST(req: Request) {
+export const POST = route("clients.create", async (req) => {
   const guard = await requireModule("clients")
   if ("response" in guard) return guard.response
   const actor = guard.user
 
-  const body = await readJson<ClientBody>(req)
-  const name = (body?.name ?? "").trim()
-  const type = body?.type ?? "CLIENT"
-  if (!name) return fail(400, "Please enter a name.")
-  if (type !== "CLIENT" && type !== "VENDOR") return fail(400, "Type must be client or vendor.")
+  const parsed = parseWith(ClientSchema, await readJson(req))
+  if (!parsed.ok) return fail(400, parsed.error)
+  const body = parsed.value
 
   const client = await db.client.create({
     data: {
-      name,
-      type,
-      email: (body?.email ?? "").trim() || null,
-      phone: (body?.phone ?? "").trim() || null,
-      address: (body?.address ?? "").trim() || null,
-      notes: (body?.notes ?? "").trim() || null,
+      name: body.name,
+      type: body.type,
+      email: body.email,
+      phone: body.phone,
+      address: body.address,
+      notes: body.notes,
     },
   })
 
@@ -95,8 +85,8 @@ export async function POST(req: Request) {
     targetType: "CLIENT",
     targetId: client.id,
     targetLabel: client.name,
-    detail: { type },
+    detail: { type: body.type },
   })
 
   return ok({ client }, 201)
-}
+})

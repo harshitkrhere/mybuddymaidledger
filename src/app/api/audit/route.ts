@@ -1,5 +1,5 @@
 import { db } from "@/lib/db"
-import { ok, requireRole } from "@/lib/api-helpers"
+import { ok, requireRole, route } from "@/lib/api-helpers"
 
 // ============================================================
 // /api/audit — the system's memory (Red & Admin only).
@@ -7,12 +7,12 @@ import { ok, requireRole } from "@/lib/api-helpers"
 
 const PAGE_SIZE = 15
 
-export async function GET(req: Request) {
+export const GET = route("audit.list", async (req) => {
   const guard = await requireRole("RED", "ADMIN")
   if ("response" in guard) return guard.response
 
   const url = new URL(req.url)
-  const search = (url.searchParams.get("q") ?? "").trim()
+  const search = (url.searchParams.get("q") ?? "").trim().slice(0, 200)
   const action = url.searchParams.get("action")
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1)
 
@@ -46,4 +46,4 @@ export async function GET(req: Request) {
     ),
     pagination: { page, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)), total },
   })
-}
+})

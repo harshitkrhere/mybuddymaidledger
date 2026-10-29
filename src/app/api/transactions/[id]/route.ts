@@ -1,13 +1,15 @@
 import { db } from "@/lib/db"
 import { audit } from "@/lib/auth"
-import { fail, ok, readJson, requireModule, requireRole } from "@/lib/api-helpers"
-import { validateTxBody } from "@/lib/finance-validation"
+import { fail, ok, readJson, requireModule, requireRole, route } from "@/lib/api-helpers"
+import { parseWith, TransactionSchema } from "@/lib/validation"
 
 // ============================================================
 // /api/transactions/[id] — edit (finance) / delete (Red & Admin)
 // ============================================================
 
-export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+type Ctx = { params: Promise<{ id: string }> }
+
+export const PATCH = route<Ctx>("transactions.update", async (req, ctx) => {
   const guard = await requireModule("transactions")
   if ("response" in guard) return guard.response
   const actor = guard.user
@@ -16,21 +18,28 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const existing = await db.transaction.findUnique({ where: { id } })
   if (!existing) return fail(404, "That transaction no longer exists.")
 
-  const body = await readJson<Parameters<typeof validateTxBody>[0]>(req)
-  const error = validateTxBody(body)
-  if (error) return fail(400, error)
+  const parsed = parseWith(TransactionSchema, await readJson(req))
+  if (!parsed.ok) return fail(400, parsed.error)
+  const body = parsed.value
+
+  if (body.categoryId && !(await db.category.findUnique({ where: { id: body.categoryId } }))) {
+    return fail(400, "That category no longer exists.")
+  }
+  if (body.clientId && !(await db.client.findUnique({ where: { id: body.clientId } }))) {
+    return fail(400, "That client no longer exists.")
+  }
 
   const tx = await db.transaction.update({
     where: { id },
     data: {
-      date: new Date(body!.date!),
-      type: body!.type!,
-      amount: body!.amount!,
-      description: body!.description!.trim(),
-      categoryId: body!.categoryId || null,
-      clientId: body!.clientId || null,
-      reference: (body!.reference ?? "").trim() || null,
-      paymentMethod: body!.paymentMethod ?? "BANK",
+      date: new Date(body.date),
+      type: body.type,
+      amount: body.amount,
+      description: body.description,
+      categoryId: body.categoryId,
+      clientId: body.clientId,
+      reference: body.reference,
+      paymentMethod: body.paymentMethod,
     },
     include: {
       category: true,
@@ -52,9 +61,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   })
 
   return ok({ transaction: tx })
-}
+})
 
-export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export const DELETE = route<Ctx>("transactions.delete", async (_req, ctx) => {
   const guard = await requireRole("RED", "ADMIN")
   if ("response" in guard) return guard.response
   const { id } = await ctx.params
@@ -73,4 +82,4 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   })
 
   return ok({ ok: true })
-}
+})

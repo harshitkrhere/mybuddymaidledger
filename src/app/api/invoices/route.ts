@@ -1,23 +1,31 @@
 import { db } from "@/lib/db"
 import { audit } from "@/lib/auth"
-import { fail, ok, readJson, requireModule } from "@/lib/api-helpers"
-import { computeInvoiceTotals, validateInvoiceBody } from "@/lib/finance-validation"
+import { fail, ok, readJson, requireModule, route } from "@/lib/api-helpers"
+import { computeInvoiceTotals, InvoiceSchema, parseWith } from "@/lib/validation"
 
 // ============================================================
 // /api/invoices — billing (finance roles). Employees: no access.
 // Statuses: DRAFT -> SENT -> PAID (OVERDUE derived on read).
+//
+// Transaction safety:
+//   · invoice number allocation + row creation run inside ONE
+//     database transaction, and a unique-number collision under
+//     concurrency is retried with a fresh sequence — two users
+//     creating invoices at the same instant can never collide.
+//   · money math (subtotal / tax / total) is computed server-side
+//     from the line items; clients never dictate totals.
 // ============================================================
 
 const PAGE_SIZE = 10
 
-export async function GET(req: Request) {
+export const GET = route("invoices.list", async (req) => {
   const guard = await requireModule("invoices")
   if ("response" in guard) return guard.response
 
   const url = new URL(req.url)
   const status = url.searchParams.get("status")
   const clientId = url.searchParams.get("clientId")
-  const search = (url.searchParams.get("q") ?? "").trim()
+  const search = (url.searchParams.get("q") ?? "").trim().slice(0, 200)
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1)
 
   const where: Record<string, unknown> = {}
@@ -64,58 +72,73 @@ export async function GET(req: Request) {
       paids: countOf("PAID"),
     },
   })
-}
+})
 
-async function nextInvoiceNumber(): Promise<string> {
+type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0]
+
+async function nextInvoiceNumber(tx: Tx): Promise<string> {
   const year = new Date().getFullYear()
-  const count = await db.invoice.count()
-  // Robust against gaps: find max sequence for this year.
-  const latest = await db.invoice.findFirst({
-    where: { number: { startsWith: `INV-${year}-` } },
+  const prefix = `INV-${year}-`
+  // Robust against gaps: find the highest sequence for this year.
+  const latest = await tx.invoice.findFirst({
+    where: { number: { startsWith: prefix } },
     orderBy: { number: "desc" },
     select: { number: true },
   })
-  const lastSeq = latest ? Number(latest.number.split("-")[2]) : 0
-  const seq = Math.max(count, lastSeq) + 1
-  return `INV-${year}-${String(seq).padStart(4, "0")}`
+  const lastSeq = latest ? Number(latest.number.slice(prefix.length)) : 0
+  if (!Number.isFinite(lastSeq)) return `${prefix}0001`
+  return `${prefix}${String(lastSeq + 1).padStart(4, "0")}`
 }
 
-export async function POST(req: Request) {
+export const POST = route("invoices.create", async (req) => {
   const guard = await requireModule("invoices")
   if ("response" in guard) return guard.response
   const actor = guard.user
 
-  const body = await readJson<Parameters<typeof validateInvoiceBody>[0]>(req)
-  const error = validateInvoiceBody(body)
-  if (error) return fail(400, error)
+  const parsed = parseWith(InvoiceSchema, await readJson(req))
+  if (!parsed.ok) return fail(400, parsed.error)
+  const body = parsed.value
 
-  const client = await db.client.findUnique({ where: { id: body!.clientId! } })
+  const client = await db.client.findUnique({ where: { id: body.clientId } })
   if (!client) return fail(400, "That client no longer exists.")
 
-  const taxRate = body!.taxRate ?? 18
-  const { lines, subtotal, taxAmount, total } = computeInvoiceTotals(body!.items!, taxRate)
-  const number = await nextInvoiceNumber()
+  const { lines, subtotal, taxAmount, total } = computeInvoiceTotals(body.items, body.taxRate)
 
-  const invoice = await db.invoice.create({
-    data: {
-      number,
-      clientId: client.id,
-      issueDate: new Date(body!.issueDate!),
-      dueDate: body!.dueDate ? new Date(body!.dueDate) : null,
-      notes: (body!.notes ?? "").trim() || null,
-      taxRate,
-      subtotal,
-      taxAmount,
-      total,
-      createdById: actor.id,
-      items: { create: lines },
-    },
-    include: {
-      client: { select: { id: true, name: true, type: true } },
-      createdBy: { select: { id: true, name: true } },
-      items: true,
-    },
-  })
+  // Race-proof creation: allocation + insert inside one transaction;
+  // a concurrent creator winning the same number triggers P2002 and
+  // we retry with a freshly allocated sequence.
+  let invoice = null as Awaited<ReturnType<typeof db.invoice.create>> | null
+  for (let attempt = 0; attempt < 3 && !invoice; attempt++) {
+    try {
+      invoice = await db.$transaction(async (tx) => {
+        const number = await nextInvoiceNumber(tx)
+        return tx.invoice.create({
+          data: {
+            number,
+            clientId: client.id,
+            issueDate: new Date(body.issueDate),
+            dueDate: body.dueDate ? new Date(body.dueDate) : null,
+            notes: body.notes,
+            taxRate: body.taxRate,
+            subtotal,
+            taxAmount,
+            total,
+            createdById: actor.id,
+            items: { create: lines },
+          },
+          include: {
+            client: { select: { id: true, name: true, type: true } },
+            createdBy: { select: { id: true, name: true } },
+            items: true,
+          },
+        })
+      })
+    } catch (err) {
+      const code = (err as { code?: string }).code
+      if (code !== "P2002") throw err // only the unique-number race is retried
+    }
+  }
+  if (!invoice) return fail(409, "Couldn't allocate an invoice number — please try again.")
 
   await audit({
     actorId: actor.id,
@@ -127,4 +150,4 @@ export async function POST(req: Request) {
   })
 
   return ok({ invoice }, 201)
-}
+})

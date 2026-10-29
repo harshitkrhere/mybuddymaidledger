@@ -64,7 +64,7 @@ export function TeamView({ me, onMutation }: { me: Me; onMutation: () => void })
     if (target.id === me.user.id) return []
     if (isRed) return ALL_ROLES.filter((r) => r !== target.role)
     if (me.user.role === "ADMIN" && (target.role === "MANAGER" || target.role === "EMPLOYEE")) {
-      return ["MANAGER", "EMPLOYEE"].filter((r) => r !== target.role)
+      return (["MANAGER", "EMPLOYEE"] as Role[]).filter((r) => r !== target.role)
     }
     return []
   }

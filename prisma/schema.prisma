@@ -2,11 +2,21 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ============================================================
+// Production database: Neon PostgreSQL (serverless).
+//   · DATABASE_URL        — POOLED connection string ("-pooler" host,
+//                           ?sslmode=require) used by the app at runtime.
+//   · DIRECT_DATABASE_URL — direct (non-pooled) connection, used ONLY
+//                           by `prisma migrate` / `prisma db push`.
+// Local development without a Neon project: `npm run db:local:start`
+// boots an embedded PostgreSQL 18 on 127.0.0.1:5433 with the same
+// schema and migrations, so dev and production run the same engine.
+// ============================================================
+
 datasource db {
-  // "sqlite" for local dev | "postgresql" for production (Neon/Supabase/Railway)
-  // Flip with: npm run db:use-postgres  /  npm run db:use-sqlite
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  directUrl    = env("DIRECT_DATABASE_URL")
 }
 
 // =============================

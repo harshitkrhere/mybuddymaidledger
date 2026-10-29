@@ -1,22 +1,27 @@
 import { db } from "@/lib/db"
-import { ok, requireModule } from "@/lib/api-helpers"
+import { fail, ok, requireModule, route } from "@/lib/api-helpers"
+import { parseWith, ReportQuerySchema } from "@/lib/validation"
 
 // ============================================================
 // /api/reports — P&L, category breakdown, cash-flow trend.
 // Pass ?format=csv to download the ledger as CSV.
+// Date-range params are validated before querying.
 // ============================================================
 
-export async function GET(req: Request) {
+export const GET = route("reports.get", async (req) => {
   const guard = await requireModule("reports")
   if ("response" in guard) return guard.response
 
   const url = new URL(req.url)
-  const fromParam = url.searchParams.get("from")
-  const toParam = url.searchParams.get("to")
+  const range = parseWith(ReportQuerySchema, {
+    from: url.searchParams.get("from") || undefined,
+    to: url.searchParams.get("to") || undefined,
+  })
+  if (!range.ok) return fail(400, range.error)
 
   const now = new Date()
-  const from = fromParam ? new Date(fromParam) : new Date(now.getFullYear(), 0, 1)
-  const to = toParam ? new Date(`${toParam}T23:59:59`) : new Date(now.getFullYear(), 11, 31, 23, 59, 59)
+  const from = range.value.from ? new Date(range.value.from) : new Date(now.getFullYear(), 0, 1)
+  const to = range.value.to ? new Date(`${range.value.to}T23:59:59`) : new Date(now.getFullYear(), 11, 31, 23, 59, 59)
 
   // ---------------- CSV export ----------------
   if (url.searchParams.get("format") === "csv") {
@@ -114,4 +119,4 @@ export async function GET(req: Request) {
     expenseByCategory: expenseByCat.map((g) => ({ name: nameOf(g.categoryId), amount: g._sum.amount ?? 0 })),
     monthly: buckets,
   })
-}
+})
